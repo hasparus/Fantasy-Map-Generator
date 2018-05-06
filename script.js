@@ -3,7 +3,7 @@
 fantasyMap();
 function fantasyMap() {
   // Version control
-  var version = "0.55b";
+  var version = "0.56b";
   document.title += " v. " + version;
 
   // Declare variables
@@ -19,8 +19,8 @@ function fantasyMap() {
     overlay = viewbox.append("g").attr("id", "overlay"),
     cults = viewbox.append("g").attr("id", "cults"),
     routes = viewbox.append("g").attr("id", "routes"),
-    roads = routes.append("g").attr("id", "roads"),
-    trails = routes.append("g").attr("id", "trails"),
+    roads = routes.append("g").attr("id", "roads").attr("data-type", "land"),
+    trails = routes.append("g").attr("id", "trails").attr("data-type", "land"),
     rivers = viewbox.append("g").attr("id", "rivers"),
     terrain = viewbox.append("g").attr("id", "terrain"),
     regions = viewbox.append("g").attr("id", "regions"),
@@ -29,12 +29,12 @@ function fantasyMap() {
     neutralBorders = borders.append("g").attr("id", "neutralBorders"),
     coastline = viewbox.append("g").attr("id", "coastline"),
     lakes = viewbox.append("g").attr("id", "lakes"),
-    searoutes = routes.append("g").attr("id", "searoutes"),
+    searoutes = routes.append("g").attr("id", "searoutes").attr("data-type", "sea"),
     labels = viewbox.append("g").attr("id", "labels"),
     icons = viewbox.append("g").attr("id", "icons"),
     burgs = icons.append("g").attr("id", "burgs"),
     ruler = viewbox.append("g").attr("id", "ruler"),
-    debug = viewbox.append("g").attr("id", "debug");
+    debug = viewbox.append("g").attr("id", "debug"),
     capitals = labels.append("g").attr("id", "capitals"),
     towns = labels.append("g").attr("id", "towns"),
     countries = labels.append("g").attr("id", "countries");
@@ -43,13 +43,13 @@ function fantasyMap() {
   var voronoi, diagram, polygons, points = [], sample;
 
   // Common variables
-  var mapWidth, mapHeight,
-    customization, history = [], historyStage = -1, elSelected,
+  var graphWidth, graphHeight, // voronoi graph extention, should be stable for each map
+    svgWidth, svgHeight, // svg canvas resolution, can vary for each map
+    allowResize = true,
+    modules = {}, customization, history = [], historyStage = 0, elSelected,
     cells = [], land = [], riversData = [],  manors = [], states = [],
-    queue = [], chain = {}, island = 0, cultureTree, manorTree, shift = false;
-
-  // default fonts
-  var fonts = ["Amatic+SC:700", "Georgia", "Times New Roman", "Arial", "Comic Sans MS", "Lucida Sans Unicode", "Verdana", "Courier New"];
+    queue = [], chain = {}, fonts = [],
+    island = 0, cultureTree, manorTree;
 
   // canvas
   var canvas = document.getElementById("canvas"),
@@ -61,8 +61,8 @@ function fantasyMap() {
       colors20 = d3.scaleOrdinal(d3.schemeCategory20);
 
   // D3 drag and zoom behavior
-  var scale = 1, viewX = 0, viewY = 0;
-  var zoom = d3.zoom().scaleExtent([1, 40]).on("zoom", zoomed);
+  var scale = 1, viewX = 0, viewY = 0, initView = [1, 0, 0];
+  var zoom = d3.zoom().scaleExtent([1, 20]).on("zoom", zoomed);
   svg.call(zoom);
 
   // randomize options
@@ -75,33 +75,26 @@ function fantasyMap() {
     precipitation = +precInput.value;
 
   // Get screen size
-  if (localStorage.getItem("screenSize")) {
-    var stored = localStorage.getItem("screenSize").split(",");
-    mapWidthInput.value = +stored[0];
-    mapHeightInput.value = +stored[1];
-    $(".fullscreen").removeClass("fullscreen");
-    $("#mapScreenSize").addClass("icon-resize-full-alt").removeClass("icon-resize-small");
-  } else {
-    mapWidthInput.value = window.innerWidth;
-    mapHeightInput.value = window.innerHeight;
-  }
-  applyMapSize();
+  mapWidthInput.value = window.innerWidth;
+  mapHeightInput.value = window.innerHeight;
+  svgWidth = graphWidth = +mapWidthInput.value;
+  svgHeight = graphHeight = +mapHeightInput.value;
+  svg.attr("width", svgWidth).attr("height", svgHeight);
+
+  // D3 Line generator variables
+  var lineGen = d3.line().x(function(d) {return d.scX;}).y(function(d) {return d.scY;});
 
   // append ocean pattern
-  oceanPattern.append("rect").attr("x", 0).attr("y", 0).attr("width", mapWidth).attr("height", mapHeight).attr("fill", "url(#oceanPattern)").attr("stroke", "none");
-  oceanLayers.append("rect").attr("x", 0).attr("y", 0).attr("width", mapWidth).attr("height", mapHeight).attr("id", "oceanBase");
+  oceanPattern.append("rect").attr("x", 0).attr("y", 0).attr("width", "100%").attr("height", "100%").attr("fill", "url(#oceanic)").attr("stroke", "none");
+  oceanLayers.append("rect").attr("x", 0).attr("y", 0).attr("width", "100%").attr("height", "100%").attr("id", "oceanBase");
 
   applyDefaultStyle();
 
   // toggle off loading screen and on menus
-  $("#loading").remove();
+  $("#loading, #initial").remove();
+  svg.style("background-color", "#000000");
   $("#optionsContainer").show();
   fitStatusBar();
-
-  // D3 Line generator
-  var scX = d3.scaleLinear().domain([0, mapWidth]).range([0, mapWidth]),
-    scY = d3.scaleLinear().domain([0, mapHeight]).range([0, mapHeight]),
-    lineGen = d3.line().x(function(d) {return scX(d.scX);}).y(function(d) {return scY(d.scY);});
 
   $("#optionsContainer").draggable({handle: ".drag-trigger", snap: "svg", snapMode: "both"});
   $("#mapLayers").sortable({items: "li:not(.solid)", cancel: ".solid", update: moveLayer});
@@ -162,32 +155,32 @@ function fantasyMap() {
 
   // Zoom to specific point (x,y - coods, z - scale, d - duration)
   function zoomTo(x, y, z, d) {
-    var transform = d3.zoomIdentity.translate(x * -z + mapWidth / 2, y * -z + mapHeight / 2).scale(z);
+    var transform = d3.zoomIdentity.translate(x * -z + graphWidth / 2, y * -z + graphHeight / 2).scale(z);
     svg.transition().duration(d).call(zoom.transform, transform);
   }
 
-  // Reset zoom to initial with some duration
+  // Reset zoom to initial
   function resetZoom(duration) {
-    svg.transition().duration(duration).call(zoom.transform, d3.zoomIdentity);
+    zoom.scaleTo(svg, initView[0]);
   }
+
+  addDragToUpload();
 
   // Changelog dialog window
   var storedVersion = localStorage.getItem("version"); // show message on load
   if (storedVersion != version) {
-    var message = "2018-03-30: The <i>Fantasy Map Generator</i> Demo is updated up to version " + version + ". Main features:<br><br>";
-    message += "<li>Countries Editor: add, remove, change borders, export data etc.</li>";
-    message += "<li>Burgs Editor: add, rename, remove, change population or capital</li>";
-    message += "<li>Scale Editor: set distance, area and population scales</li>";
-    message += "<li>Measurers: linear distance, curve length and area measurers</li>";
-    message += "<li>Scale bar: toggable auto-rourded and auto-sized bar</li>";
-    message += "<li>Overlays: hex grid, square grid, wind rose</li>";
-    message += "<br><i>See ";
-    message += "<a href='https://github.com/Azgaar/Fantasy-Map-Generator/wiki/Changelog' target='_blank'>changelog</a>";
-    message += " for more details. Please report bugs ";
-    message += "<a href='https://github.com/Azgaar/Fantasy-Map-Generator/issues' target='_blank'>here</a></i>";
-    alertMessage.innerHTML = message;
+    alertMessage.innerHTML = `2018-05-06:
+      The <i>Fantasy Map Generator</i> Demo is updated up to version ${version}.
+      Main changes:<br><br>
+      <li>Performance improvement</li>
+      <li>Route editor</li>
+      <li>Countries and River editors fixes</li>
+      <li>Map saving and loading fixes</li>
+      <li>New loading screen</li>
+      <br><i>See <a href='https://github.com/Azgaar/Fantasy-Map-Generator/wiki/Changelog' target='_blank'>changelog</a> for older versions.<br>
+      Please report bugs <a href='https://github.com/Azgaar/Fantasy-Map-Generator/issues' target='_blank'>here</a></i>`;
     $("#alert").dialog(
-      {resizable: false, title: "Fantasy Map Generator v. " + version, width: 400,
+      {resizable: false, title: "Fantasy Map Generator v. " + version, width: 280,
       buttons: {
         "Don't show again": function() {
           localStorage.setItem("version", version);
@@ -241,7 +234,7 @@ function fantasyMap() {
     console.time("placePoints");
     points = [];
     var radius = 5.9 / graphSize; // 5.9 is a radius to get 8k cells
-    var sampler = poissonDiscSampler(mapWidth, mapHeight, radius);
+    var sampler = poissonDiscSampler(graphWidth, graphHeight, radius);
     while (sample = sampler()) {
       var x = rn(sample[0], 2);
       var y = rn(sample[1], 2);
@@ -277,18 +270,29 @@ function fantasyMap() {
     if (customization === 1 && icons.selectAll(".tag").size() === 1) {
       var x = +icons.select(".tag").attr("cx");
       var y = +icons.select(".tag").attr("cy");
-      icons.insert("line", ":first-child").attr("class", "line").attr("x1", x).attr("y1", y).attr("x2", point[0]).attr("y2", point[1]);
+      icons.insert("line", ":first-child").attr("class", "line")
+        .attr("x1", x).attr("y1", y).attr("x2", point[0]).attr("y2", point[1]);
     }
     // draw circle to show brush radius for Customization
     var circle = icons.selectAll(".circle");
-    var brush = $("#brushesButtons .pressed");
     if (customization === 1 || customization === 2) {
+      var brush = $("#brushesButtons > .pressed");
       if (customization === 1 && (brush.length === 0 || brush.hasClass("feature"))) {circle.remove(); return;}
       if (customization === 2 && $("div.selected").length === 0) {circle.remove(); return;}
       var radius = customization === 1 ? brushRadius.value : countriesManuallyBrush.value;
       var r = rn(6 / graphSize * radius, 1);
-      if (circle.size() > 0) {circle.attr("r", r).attr("cx", point[0]).attr("cy", point[1]);}
-      else {icons.insert("circle", ":first-child").attr("class", "circle").attr("r", r).attr("cx", point[0]).attr("cy", point[1]);}
+      let clr = "#666666;"
+      if (customization === 2) {
+        const state = +$("div.selected").attr("id").slice(5);
+        clr = states[state].color === "neutral" ? "white" :states[state].color;
+      }
+      if (circle.size() > 0) {
+        circle.attr("r", r).attr("cx", point[0]).attr("cy", point[1]).attr("stroke", clr);
+      } else {
+        icons.insert("circle", ":first-child").attr("class", "circle")
+          .attr("r", r).attr("stroke", color)
+          .attr("cx", point[0]).attr("cy", point[1]);
+      }
     } else {circle.remove();}
   }
 
@@ -334,71 +338,36 @@ function fantasyMap() {
     d3.event.on("drag", function() {
       x1 = d3.event.x, y1 = d3.event.y;
       var c2 = diagram.find(x1, y1).index;
+      const circle = icons.selectAll(".circle");
       // Heightmap customization
       if (customization === 1) {
-        if (c2 !== c1) {
-          c1 = c2;
-          var brush = $("#brushesButtons .pressed").attr("id");
-          var power = +brushPower.value;
-          if (brush === "brushHill") {add(c2, "hill", power);}
-          if (brush === "brushPit") {addPit(1, power, c2);}
-          if (!$("#brushesButtons .pressed").hasClass("feature")) {
-            // move a circle to show actual change radius
-            var radius = +brushRadius.value;
-            var r = rn(6 / graphSize * radius, 1);
-            var circle = icons.selectAll(".circle");
-            if (circle.size() > 0) {circle.attr("r", r).attr("cx", x1).attr("cy", y1);}
-            else {icons.insert("circle", ":first-child").attr("class", "circle").attr("r", r).attr("cx", x1).attr("cy", y1);}
-            updateCellsInRadius(c2, c0);
-          }
+        if (c2 === c1 && x1 !== x0 && y1 !== y0) {return;}
+        c1 = c2;
+        const brush = $("#brushesButtons > .pressed");
+        const id = brush.attr("id");
+        const power = +brushPower.value;
+        if (id === "brushHill") {add(c2, "hill", power); updateHeightmap();}
+        if (id === "brushPit") {addPit(1, power, c2); updateHeightmap();}
+        if (!brush.hasClass("feature")) {
+          // move a circle to show approximate change radius
+          const radius = +brushRadius.value;
+          const r = rn(6 / graphSize * radius, 1);
+          if (circle.size() > 0) {circle.attr("r", r).attr("cx", x1).attr("cy", y1);}
+          else {icons.insert("circle", ":first-child").attr("class", "circle").attr("r", r).attr("cx", x1).attr("cy", y1);}
+          updateCellsInRadius(c2, c0);
         }
-        mockHeightmap();
       }
       // Countries customization
       if (customization === 2 && $("div.selected").length) {
         // move a circle to show actual change radius
-        var radius = +countriesManuallyBrush.value;
-        var r = rn(6 / graphSize * radius, 1);
-        var circle = icons.selectAll(".circle");
+        const radius = +countriesManuallyBrush.value;
+        const r = rn(6 / graphSize * radius, 1);
         if (circle.size() > 0) {circle.attr("r", r).attr("cx", x1).attr("cy", y1);}
         else {icons.insert("circle", ":first-child").attr("class", "circle").attr("r", r).attr("cx", x1).attr("cy", y1);}
-        // define selection based on radius
-        var selection = [c2];
-        while (radius > 1) {
-          var frontier = selection.slice();
-          frontier.map(function(s) {
-            cells[s].neighbors.forEach(function(e) {
-              if (selection.indexOf(e) === -1) {selection.push(e);}
-            });
-          });
-          radius--;
-        }
-        // change region within selection
-        selection.map(function(c2) {
-          if (cells[c2].height >= 0.2 && c2 !== c0) {
-            var exists = regions.select("#temp").select("path[data-cell='"+c2+"']");
-            if (exists.size()) {exists.remove();}
-            var stateNew = +$("div.selected").attr("id").slice(5); // state
-            if (states[stateNew].capital === "neutral") {stateNew = "neutral";}
-            var stateOld = cells[c2].region;
-            if (stateNew !== stateOld) {
-              var color = stateNew !== "neutral" ? states[stateNew].color : "white";
-              if (stateOld !== "neutral") {
-                if (cells[c2].manor !== states[stateOld].capital) {
-                  regions.select("#temp").append("path")
-                    .attr("data-cell", c2).attr("data-state", stateNew)
-                    .attr("d", "M" + polygons[c2].join("L") + "Z")
-                    .attr("fill", color).attr("stroke", color);
-                }
-              } else {
-                regions.select("#temp").append("path")
-                  .attr("data-cell", c2).attr("data-state", stateNew)
-                  .attr("d", "M" + polygons[c2].join("L") + "Z")
-                  .attr("fill", color).attr("stroke", color);
-              }
-            }
-          }
-        });
+        if (c2 === c1 && x1 !== x0 && y1 !== y0) {return;}
+        c1 = c2;
+        selection = defineStateBrushSelection(c2);
+        changeStateForSelection(selection);
       }
       if (opisometer || planimeter) {
         var l = points[points.length - 1];
@@ -421,9 +390,10 @@ function fantasyMap() {
     });
 
     d3.event.on("end", function() {
+      if (customization === 1) {updateHistory();}
       if (opisometer || planimeter) {
         $("#addOpisometer, #addPlanimeter").removeClass("pressed");
-        restoreDefaultDrag();
+        restoreDefaultEvents();
         if (opisometer) {
           var dist = rn(curve.node().getTotalLength());
           var c = curve.node().getPointAtLength(dist / 2);
@@ -451,8 +421,8 @@ function fantasyMap() {
   }
 
   // restore default drag (map panning) and cursor
-  function restoreDefaultDrag() {
-    viewbox.style("cursor", "default").on(".drag", null);
+  function restoreDefaultEvents() {
+    viewbox.style("cursor", "default").on(".drag", null).on("click", null);
   }
 
   // remove parent element (usually if child is clicked)
@@ -460,26 +430,85 @@ function fantasyMap() {
     $(this.parentNode).remove();
   }
 
-  // update cells in radius if non-feature brush selected on both single click and drag
-  function updateCellsInRadius(cell, source) {
-    var power = +brushPower.value;
-    var radius = +brushRadius.value;
-    var brush = $("#brushesButtons .pressed").attr("id");
-    if ($("#brushesButtons .pressed").hasClass("feature")) {return;}
-    // define selection besed on radius
-    var selection = [cell];
-    while (radius > 1) {
-      var frontier = selection.slice();
-      frontier.map(function(s) {
+  // define selection based on radius
+  function defineStateBrushSelection(center) {
+    let radius = +countriesManuallyBrush.value;
+    let selection = [center];
+    if (radius > 1) {selection = selection.concat(cells[center].neighbors);}
+    if (radius === 2) {return selection;}
+    let frontier = cells[center].neighbors;
+    while (radius > 2) {
+      let cycle = frontier.slice();
+      frontier = [];
+      cycle.map(function(s) {
         cells[s].neighbors.forEach(function(e) {
-          if (selection.indexOf(e) === -1) {selection.push(e);}
+          if (selection.indexOf(e) !== -1) {return;}
+          selection.push(e);
+          frontier.push(e);
         });
       });
       radius--;
     }
+    return $.grep(selection, function(e) {return (cells[e].height >= 0.2);});
+  }
+
+  // change region within selection
+  function changeStateForSelection(selection) {
+    let stateNew, exists, stateOld, color;
+    const temp = regions.select("#temp");
+    selection.map(function(index) {
+      // keep stateOld and stateNew as integers!
+      stateNew = +$("div.selected").attr("id").slice(5);
+      exists = temp.select("path[data-cell='"+index+"']");
+      let region = cells[index].region === "neutral" ? states.length - 1 : cells[index].region
+      stateOld = exists.size() ? +exists.attr("data-state") : region;
+      if (stateNew !== stateOld) {
+        // not allowed to re-draw calitals
+        if (states[stateOld].capital === cells[index].manor) {return;}
+        // define color
+        color = states[stateNew].color === "neutral" ? "white" : states[stateNew].color;
+        // change of append new element
+        if (exists.size()) {
+          exists.attr("data-cell", index).attr("data-state", stateNew)
+            .attr("d", "M" + polygons[index].join("L") + "Z")
+            .attr("fill", color).attr("stroke", color);
+        } else {
+          temp.append("path").attr("data-cell", index).attr("data-state", stateNew)
+            .attr("d", "M" + polygons[index].join("L") + "Z")
+            .attr("fill", color).attr("stroke", color);
+        }
+      }
+    });
+  }
+
+  // update cells in radius if non-feature brush selected
+  function updateCellsInRadius(cell, source) {
+    const power = +brushPower.value;
+    let radius = +brushRadius.value;
+    const brush = $("#brushesButtons > .pressed").attr("id");
+    if ($("#brushesButtons > .pressed").hasClass("feature")) {return;}
+    // define selection besed on radius
+    let selection = [cell];
+    if (radius > 1) {selection = selection.concat(cells[cell].neighbors);}
+    if (radius > 2) {
+      let frontier = cells[cell].neighbors;
+      while (radius > 2) {
+        let cycle = frontier.slice();
+        frontier = [];
+        cycle.map(function(s) {
+          cells[s].neighbors.forEach(function(e) {
+            if (selection.indexOf(e) !== -1) {return;}
+            selection.push(e);
+            frontier.push(e);
+          });
+        });
+        radius--;
+      }
+    }
     // change each cell in the selection
-    var sourceHeight = cells[source].height;
+    const sourceHeight = cells[source].height;
     selection.map(function(s) {
+      // calculate changes
       if (brush === "brushElevate") {
         if (cells[s].height < 0.2) {cells[s].height = 0.2}
         else {cells[s].height += power;}
@@ -487,11 +516,30 @@ function fantasyMap() {
       if (brush === "brushDepress") {cells[s].height -= power;}
       if (brush === "brushAlign") {cells[s].height = sourceHeight;}
       if (brush === "brushSmooth") {
-        var heights = [cells[s].height];
+        let heights = [cells[s].height];
         cells[s].neighbors.forEach(function(e) {heights.push(cells[e].height);});
         cells[s].height = (cells[s].height + d3.mean(heights)) / 2;
       }
     });
+    updateHeightmapSelection(selection);
+  }
+
+  // Mouseclick events
+  function placeLinearFeature() {
+    const point = d3.mouse(this);
+    const index = getIndex(point);
+    let tag = icons.selectAll(".tag");
+    if (tag.size() === 0) {
+      tag = icons.append("circle").attr("data-cell", index).attr("class", "tag")
+        .attr("r", 3).attr("cx", point[0]).attr("cy", point[1]);
+    } else {
+      const from = +tag.attr("data-cell");
+      icons.selectAll(".tag, .line").remove();
+      const power = +brushPower.value;
+      const mod = $("#brushesButtons > .pressed").attr("id") === "brushRange" ? 1 : -1;
+      const selection = addRange(mod, power, from, index);
+      updateHeightmapSelection(selection);
+    }
   }
 
   // turn D3 polygons array into cell array, define neighbors for each cell
@@ -534,7 +582,7 @@ function fantasyMap() {
       if (rnd <= 0.01) {mapTemplate = "Atoll";}
     }
     addMountain();
-    var mod = rn((mapWidth + mapHeight) / 1500, 2); // add mod for big screens
+    var mod = rn((graphWidth + graphHeight) / 1500, 2); // add mod for big screens
     if (mapTemplate === "Volcano") {templateVolcano(mod);}
     if (mapTemplate === "High Island") {templateHighIsland(mod);}
     if (mapTemplate === "Low Island") {templateLowIsland(mod);}
@@ -612,8 +660,8 @@ function fantasyMap() {
   }
 
   function addMountain() {
-    var x = Math.floor(Math.random() * mapWidth / 3 + mapWidth / 3);
-    var y = Math.floor(Math.random() * mapHeight * 0.2 + mapHeight * 0.4);
+    var x = Math.floor(Math.random() * graphWidth / 3 + graphWidth / 3);
+    var y = Math.floor(Math.random() * graphHeight * 0.2 + graphHeight * 0.4);
     var rnd = diagram.find(x, y).index;
     var height = Math.random() * 0.1 + 0.9;
     add(rnd, "mountain", height);
@@ -625,8 +673,8 @@ function fantasyMap() {
       var limit = 0;
       do {
         var height = Math.random() * 0.4 + 0.1;
-        var x = Math.floor(Math.random() * mapWidth * (1-shift*2) + mapWidth * shift);
-        var y = Math.floor(Math.random() * mapHeight * (1-shift*2) + mapHeight * shift);
+        var x = Math.floor(Math.random() * graphWidth * (1-shift*2) + graphWidth * shift);
+        var y = Math.floor(Math.random() * graphHeight * (1-shift*2) + graphHeight * shift);
         var rnd = diagram.find(x, y).index;
         limit ++;
       } while (cells[rnd].height + height > 0.9 && limit < 100)
@@ -668,20 +716,21 @@ function fantasyMap() {
   function addRange(mod, height, from, to) {
     var session = Math.ceil(Math.random() * 100000);
     var count = Math.abs(mod);
+    let range = [];
     for (c = 0; c < count; c++) {
+      range = [];
       var diff = 0, start = from, end = to;
       if (!start || !end) {
         do {
-          var xf = Math.floor(Math.random() * (mapWidth*0.7)) + mapWidth*0.15;
-          var yf = Math.floor(Math.random() * (mapHeight*0.6)) + mapHeight*0.2;
+          var xf = Math.floor(Math.random() * (graphWidth*0.7)) + graphWidth*0.15;
+          var yf = Math.floor(Math.random() * (graphHeight*0.6)) + graphHeight*0.2;
           start = diagram.find(xf, yf).index;
-          var xt = Math.floor(Math.random() * (mapWidth*0.7)) + mapWidth*0.15;
-          var yt = Math.floor(Math.random() * (mapHeight*0.6)) + mapHeight*0.2;
+          var xt = Math.floor(Math.random() * (graphWidth*0.7)) + graphWidth*0.15;
+          var yt = Math.floor(Math.random() * (graphHeight*0.6)) + graphHeight*0.2;
           end = diagram.find(xt, yt).index;
           diff = Math.hypot(xt - xf, yt - yf);
         } while (diff < 150 / graphSize || diff > 300  / graphSize)
       }
-      var range = [];
       if (start && end) {
         for (var l = 0; start != end && l < 10000; l++) {
           var min = 10000;
@@ -710,14 +759,15 @@ function fantasyMap() {
         });
       });
     }
+    return range;
   }
 
   function addStrait(width) {
     var session = Math.ceil(Math.random() * 100000);
-    var top = Math.floor(Math.random() * mapWidth * 0.35 + mapWidth * 0.3);
-    var bottom = Math.floor((mapWidth - top) - (mapWidth * 0.1) + (Math.random() * mapWidth * 0.2));
-    var start = diagram.find(top, mapHeight * 0.2).index;
-    var end = diagram.find(bottom, mapHeight * 0.8).index;
+    var top = Math.floor(Math.random() * graphWidth * 0.35 + graphWidth * 0.3);
+    var bottom = Math.floor((svgWidth - top) - (graphWidth * 0.1) + (Math.random() * graphWidth * 0.2));
+    var start = diagram.find(top, graphHeight * 0.2).index;
+    var end = diagram.find(bottom, graphHeight * 0.8).index;
     var range = [];
     for (var l = 0; start !== end && l < 1000; l++) {
       var min = 10000; // dummy value
@@ -1022,41 +1072,78 @@ function fantasyMap() {
     console.timeEnd("reGraph");
   }
 
-  // Draw temp Heightmap for Customization
-  function mockHeightmap(log) {
+  // redraw all cells for Customization 1 mode
+  function mockHeightmap() {
+    let heights = [];
+    let landCells = 0;
     $("#landmass").empty();
-    var heights = [];
-    var landCells = 0;
     cells.map(function(i) {
-      if (i.height > 1) {i.height = 1;}
-      if (i.height < 0) {i.height = 0;}
-      if (i.height >= 0.2) {
-        landCells++;
-        landmass.append("path")
-          .attr("d", "M" + polygons[i.index].join("L") + "Z")
-          .attr("fill", color(1 - i.height))
-          .attr("stroke", color(1 - i.height));
-      }
-      heights.push(i.height);
+      if (i.height < 0.2) {return;}
+      const clr = color(1 - i.height);
+      landmass.append("path").attr("id", "cell"+i.index)
+        .attr("d", "M" + polygons[i.index].join("L") + "Z")
+        .attr("fill", clr).attr("stroke", clr);
     });
-    // update history
-    if (log !== "nolog") {
-      history = history.slice(0, historyStage);
-      history[historyStage] = heights;
-      historyStage += 1;
-    }
-    redo.disabled = true;
-    undo.disabled = true;
-    if (historyStage < history.length - 1) {redo.disabled = false;}
-    if (historyStage > 0) {undo.disabled = false;}
+  }
+
+  // draw or update all cells
+  function updateHeightmap() {
+    cells.map(function(c) {
+      let height = c.height;
+      if (height > 1) {height = 1;}
+      if (height < 0) {height = 0;}
+      c.height = height;
+      let cell = landmass.select("#cell"+c.index);
+      const clr = color(1 - height);
+      if (cell.size()) {
+        if (height < 0.2) {cell.remove();}
+        else {cell.attr("fill", clr).attr("stroke", clr);}
+      } else if (height >= 0.2) {
+        cell = landmass.append("path").attr("id", "cell"+c.index)
+          .attr("d", "M" + polygons[c.index].join("L") + "Z")
+          .attr("fill", clr).attr("stroke", clr);
+      }
+    });
+  }
+
+  // draw or update cells from the selection
+  function updateHeightmapSelection(selection) {
+    if (selection === undefined) {selection = cells;}
+    selection.map(function(s) {
+      let height = cells[s].height;
+      if (height > 1) {height = 1;}
+      if (height < 0) {height = 0;}
+      cells[s].height = height;
+      let cell = landmass.select("#cell"+s);
+      const clr = color(1 - height);
+      if (cell.size()) {
+        if (height < 0.2) {cell.remove();}
+        else {cell.attr("fill", clr).attr("stroke", clr);}
+      } else if (height >= 0.2) {
+        cell = landmass.append("path").attr("id", "cell"+s)
+          .attr("d", "M" + polygons[s].join("L") + "Z")
+          .attr("fill", clr).attr("stroke", clr);
+      }
+    });
+  }
+
+  function updateHistory() {
+    let heights = [];
+    let landCells = 0;
+    cells.map(function(c) {
+      heights.push(c.height);
+      if (c.height >= 0.2) {landCells++;}
+    });
+    history = history.slice(0, historyStage);
+    history[historyStage] = heights;
+    historyStage++;
+    undo.disabled = templateUndo.disabled = historyStage > 1 ? false : true;
+    redo.disabled = templateRedo.disabled = true;
     var elevationAverage = rn(d3.mean(heights), 2);
     var landRatio = rn(landCells / cells.length * 100);
     landmassCounter.innerHTML = landCells + " (" + landRatio + "%); Average Elevation: " + elevationAverage;
-    if (landCells > 100) {
-      $("#getMap").attr("disabled", false).removeClass("buttonoff");
-    } else {
-      $("#getMap").attr("disabled", true).addClass("buttonoff");
-    }
+    if (landCells > 100) {$("#getMap").attr("disabled", false).removeClass("buttonoff");}
+    else {$("#getMap").attr("disabled", true).addClass("buttonoff");}
     // if perspective is displayed, update it
     if ($("#perspectivePanel").is(":visible")) {drawPerspective();}
   }
@@ -1064,12 +1151,21 @@ function fantasyMap() {
   // restoreHistory
   function restoreHistory(step) {
     historyStage = step;
-    var heights = history[historyStage];
+    redo.disabled = templateRedo.disabled = historyStage < history.length ? false : true;
+    undo.disabled = templateUndo.disabled = historyStage > 1 ? false : true;
+    let heights = history[historyStage - 1];
     if (heights === undefined) {return;}
-    cells.map(function(i, d) {
-      i.height = heights[d];
-    });
-    mockHeightmap("nolog");
+    cells.map(function(i, d) {i.height = heights[d];});
+    updateHeightmap();
+  }
+
+  // restart history from 1st step
+  function restartHistory() {
+    history = [];
+    historyStage = 0;
+    redo.disabled = templateRedo.disabled = true;
+    undo.disabled = templateUndo.disabled = true;
+    updateHistory();
   }
 
   // Detect and draw the coasline
@@ -1078,7 +1174,7 @@ function fantasyMap() {
     getCurveType();
     var oceanCoastline = "", lakeCoastline = "";
     $("#landmass").empty();
-    var minX = mapWidth, maxX = 0; // extreme points
+    var minX = graphWidth, maxX = 0; // extreme points
     var minXedge, maxXedge; // extreme edges
     for (var isle = 0; isle < island; isle++) {
       var coastal = $.grep(land, function(e) {return (e.ctype === 1 && e.fn === isle);});
@@ -1166,15 +1262,18 @@ function fantasyMap() {
         scaleBar.append("text").attr("x", x + value).attr("y", y - 2 * size).attr("font-size", rn(5 * size, 1)).text(label);
       }
     }
-    label = `One pixel equals ${dScale} ${unit}`;
-    scaleBar.append("text").attr("x", x + (l+1) / 2).attr("y", y + 2 * size).attr("dominant-baseline", "text-before-edge").attr("font-size", rn(7 * size, 1)).text(label);
+    if (barLabel.value !== "") {
+      scaleBar.append("text").attr("x", x + (l+1) / 2).attr("y", y + 2 * size)
+        .attr("dominant-baseline", "text-before-edge")
+        .attr("font-size", rn(7 * size, 1)).text(barLabel.value);
+    }
     // move scaleBar to desired bottom-right point
     var tr, bbox = scaleBar.node().getBBox();
-    if (localStorage.getItem("scaleBar")) {
-      var scalePos = localStorage.getItem("scaleBar").split(",");
+    if (sessionStorage.getItem("scaleBar")) {
+      var scalePos = sessionStorage.getItem("scaleBar").split(",");
       tr = [+scalePos[0] - bbox.width, +scalePos[1] - bbox.height];
     } else {
-      tr = [mapWidth - 10 - bbox.width, mapHeight - 10 - bbox.height];
+      tr = [svgWidth - 10 - bbox.width, svgHeight - 5 - bbox.height];
     }
     scaleBar.attr("transform", "translate(" + rn(tr[0]) + "," + rn(tr[1]) + ")");
   }
@@ -1182,8 +1281,8 @@ function fantasyMap() {
   // draw default ruler measiring land x-axis edges
   function drawDefaultRuler(minXedge, maxXedge) {
     var title =
-    `Ruler is an instrument for measuring thelinear lengths.
-    One dash shows 30 km (18.6 mi), approximate distance of a daily loaded march.
+    `Ruler is an instrument for measuring the linear lengths.
+    One dash shows 10 pixels (10 mi on default scale, approximate daily march distance).
     Drag edge circles to move the ruler, center circle to split the ruler into 2 parts.
     Click on the ruler label to remove the ruler from the map`;
     var rulerNew = ruler.append("g").attr("class", "linear").call(d3.drag().on("start", elementDrag));
@@ -1217,7 +1316,7 @@ function fantasyMap() {
       // remember scaleBar bottom-right position
       if (el.attr("id") === "scaleBar") {
         var bbox = el.node().getBoundingClientRect();
-        localStorage.setItem("scaleBar", [bbox.right, bbox.bottom])
+        sessionStorage.setItem("scaleBar", [bbox.right, bbox.bottom])
       }
     });
   }
@@ -1475,7 +1574,6 @@ function fantasyMap() {
 
   function drawRiverLines(riverNext) {
     console.time('drawRiverLines');
-    lineGen.curve(d3.curveCatmullRom.alpha(0.1));
     for (var i = 0; i < riverNext; i++) {
       var dataRiver = $.grep(riversData, function(e) {return e.river === i;});
       if (dataRiver.length > 1) {
@@ -1483,9 +1581,7 @@ function fantasyMap() {
         var width = rn(0.8 + Math.random() * 0.4, 1);
         var increment = rn(0.8 + Math.random() * 0.4, 1);
         var d = drawRiver(riverAmended, width, increment);
-        rivers.append("path").attr("d", d).attr("id", "river"+i)
-          .attr("data-points", round(JSON.stringify(riverAmended), 1))
-          .attr("data-width", width).attr("data-increment", increment);
+        rivers.append("path").attr("d", d).attr("id", "river"+i).attr("data-width", width).attr("data-increment", increment);
       }
     }
     rivers.selectAll("path").on("click", editRiver);
@@ -1534,16 +1630,18 @@ function fantasyMap() {
     return riverAmended;
   }
 
+  // draw river polygon using arrpoximation
   function drawRiver(points, width, increment) {
+      lineGen.curve(d3.curveCatmullRom.alpha(0.1));
       var extraOffset = 0.02; // start offset to make river source visible
-      var width = width || 1; // river width modifier
-      var increment = increment || 1; // river bed widening modifier
+      width = width || 1; // river width modifier
+      increment = increment || 1; // river bed widening modifier
       var riverLength = 0;
       points.map(function(p, i) {
         if (i === 0) {return 0;}
         riverLength += Math.hypot(p[0] - points[i-1][0], p[1] - points[i-1][1]);
       });
-      var widening = rn((1000 + (riverLength * 30)) * increment); // FIX me!
+      var widening = rn((1000 + (riverLength * 30)) * increment);
       var riverPointsLeft = [], riverPointsRight = [];
       var last = points.length - 1;
       var factor = riverLength / points.length;
@@ -1583,215 +1681,361 @@ function fantasyMap() {
       var right = lineGen(riverPointsRight);
       var left = lineGen(riverPointsLeft);
       left = left.substring(left.indexOf("C"));
-      var d = round(right + left + "Z", 2);
-      return d;
+      return round(right + left, 2);
+  }
+
+  // draw river polygon with best quality
+  function drawRiverSlow(points, width, increment) {
+      lineGen.curve(d3.curveCatmullRom.alpha(0.1));
+      width = width || 1;
+      var extraOffset = 0.02 * width;
+      increment = increment || 1;
+      var riverPoints = points.map(function(p) {return {scX: p[0], scY: p[1]};});
+      var river = defs.append("path").attr("d", lineGen(riverPoints));
+      var riverLength = river.node().getTotalLength();
+      var widening = rn((1000 + (riverLength * 30)) * increment);
+      var riverPointsLeft = [], riverPointsRight = [];
+
+      for (let l = 0; l < riverLength; l++) {
+        var point = river.node().getPointAtLength(l);
+        var from = river.node().getPointAtLength(l - 0.1);
+        var to = river.node().getPointAtLength(l + 0.1);
+        var angle = Math.atan2(from.y - to.y, from.x - to.x);
+        var offset = (Math.atan(Math.pow(l, 2) / widening) / 2 * width) + extraOffset;
+        var xLeft = point.x + -Math.sin(angle) * offset;
+        var yLeft = point.y + Math.cos(angle) * offset;
+        riverPointsLeft.push({scX:xLeft, scY:yLeft});
+        var xRight = point.x + Math.sin(angle) * offset;
+        var yRight = point.y + -Math.cos(angle) * offset;
+        riverPointsRight.unshift({scX:xRight, scY:yRight});
+      }
+
+      var point = river.node().getPointAtLength(riverLength);
+      var from = river.node().getPointAtLength(riverLength - 0.1);
+      var angle = Math.atan2(from.y - point.y, from.x - point.x);
+      var offset = (Math.atan(Math.pow(riverLength, 2) / widening) / 2 * width) + extraOffset;
+      var xLeft = point.x + -Math.sin(angle) * offset;
+      var yLeft = point.y + Math.cos(angle) * offset;
+      riverPointsLeft.push({scX:xLeft, scY:yLeft});
+      var xRight = point.x + Math.sin(angle) * offset;
+      var yRight = point.y + -Math.cos(angle) * offset;
+      riverPointsRight.unshift({scX:xRight, scY:yRight});
+
+      river.remove();
+      // generate path and return
+      var right = lineGen(riverPointsRight);
+      var left = lineGen(riverPointsLeft);
+      left = left.substring(left.indexOf("C"));
+      return round(right + left, 2);
   }
 
   function editRiver() {
-    if ($("#riverNew").hasClass('pressed')) {
-      var point = d3.mouse(this);
-      addRiverPoint({scX:point[0], scY:point[1]});
-      redrawRiver();
-      $("#riverNew").click();
-      return;
+    if (customization) {return;}
+    if (elSelected) {
+      const self = d3.select(this).attr("id") === elSelected.attr("id") ? true : false;
+      const point = d3.mouse(this);
+      if (elSelected.attr("data-river") === "new") {
+        addRiverPoint([point[0], point[1]]);
+        completeNewRiver();
+        return;
+      } else if (self) {
+        riverAddControlPoint(point);
+        return;
+      }
     }
+
     unselect();
+    closeDialogs("#riverEditor, .stable");
     elSelected = d3.select(this);
-    elSelected.call(d3.drag().on("start", riverDrag)).classed("draggable", true);
-    var points = JSON.parse(elSelected.attr("data-points"));
-    rivers.append("g").attr("class", "riverPoints").attr("transform", elSelected.attr("transform"));
-    points.map(function(p) {addRiverPoint(p)});
-    var tr = parseTransform(elSelected.attr("transform"));
+    elSelected.call(d3.drag().on("start", riverDrag));
+
+    const tr = parseTransform(elSelected.attr("transform"));
     riverAngle.value = tr[2];
     riverAngleValue.innerHTML = Math.abs(+tr[2]) + "°";
     riverScale.value = tr[5];
     riverWidthInput.value = +elSelected.attr("data-width");
     riverIncrement.value = +elSelected.attr("data-increment");
+
     $("#riverEditor").dialog({
       title: "Edit River",
-      minHeight: 30, width: "auto", maxWidth: 275, resizable: false,
-      position: {my: "center top", at: "top", of: this}
-    }).on("dialogclose", function() {unselect();});
-  }
+      minHeight: 30, width: "auto", resizable: false,
+      position: {my: "center top+20", at: "top", of: d3.event},
+      close: function() {
+        if ($("#riverNew").hasClass('pressed')) {completeNewRiver();}
+        unselect();
+      }
+    });
 
-  function unselect() {
-    if (elSelected) {
-      elSelected.call(d3.drag().on("drag", null)).classed("draggable", false);
-      rivers.select(".riverPoints").remove();
-      $(".pressed").removeClass('pressed');
-      viewbox.style("cursor", "default");
-      elSelected = null;
-      if ($("#riverEditor").is(":visible")) {$("#riverEditor").dialog("close");}
-      if ($("#labelEditor").is(":visible")) {$("#labelEditor").dialog("close");}
-    }
-  }
+    const controlPoints = icons.append("g").attr("class", "controlPoints")
+      .attr("transform", elSelected.attr("transform"));
+    riverDrawPoints();
 
-  function addRiverPoint(point) {
-    rivers.select(".riverPoints").append("circle")
-      .attr("cx", point[0]).attr("cy", point[1]).attr("r", 0.35)
-      .call(d3.drag().on("start", riverPointDrag))
-      .on("click", function(d) {
-        if ($("#riverRemovePoint").hasClass('pressed')) {
-          $(this).remove(); redrawRiver();
-        }
-        if ($("#riverNew").hasClass('pressed')) {
-          $("#riverNew").click();
-        }
+    if (modules.editRiver) {return;}
+    modules.editRiver = true;
+
+    function riverAddControlPoint(point) {
+      let dists = [];
+      icons.select(".controlPoints").selectAll("circle").each(function() {
+        const x = +d3.select(this).attr("cx");
+        const y = +d3.select(this).attr("cy");
+        dists.push(Math.hypot(point[0] - x, point[1] - y));
       });
-  }
+      let index = dists.length;
+      if (dists.length > 1) {
+        const sorted = dists.slice(0).sort(function(a, b) {return a-b;});
+        const closest = dists.indexOf(sorted[0]);
+        const next = dists.indexOf(sorted[1]);
+        if (closest <= next) {index = closest+1;} else {index = next+1;}
+      }
+      const before = ":nth-child(" + (index + 1) + ")";
+      icons.select(".controlPoints").insert("circle", before)
+        .attr("cx", point[0]).attr("cy", point[1]).attr("r", 0.35)
+        .call(d3.drag().on("drag", riverPointDrag))
+        .on("click", function(d) {
+          $(this).remove();
+          redrawRiver();
+        });
+      redrawRiver();
+    }
 
-  function riverPointDrag() {
-    var x = d3.event.x, y = d3.event.y;
-    var el = d3.select(this);
-    d3.event
-      .on("drag", function() {el.attr("cx", d3.event.x).attr("cy", d3.event.y);})
-      .on("end", function() {redrawRiver();});
-  }
+    function riverDrawPoints() {
+      const node = elSelected.node();
+      // river is a polygon, so divide length by 2 to get course length
+      const l = node.getTotalLength() / 2;
+      const parts = (l / 5) >> 0; // number of points
+      let inc = l / parts; // increment
+      if (inc === Infinity) {inc = l;} // 2 control points for short rivers
+      // draw control points
+      for (var i = l, c = l; i > 0; i -= inc, c += inc) {
+        const p1 = node.getPointAtLength(i);
+        const p2 = node.getPointAtLength(c);
+        const p = [(p1.x + p2.x) / 2, (p1.y + p2.y) / 2];
+        addRiverPoint(p);
+      }
+      // last point should be accurate
+      const lp1 = node.getPointAtLength(0);
+      const lp2 = node.getPointAtLength(l * 2);
+      const p = [(lp1.x + lp2.x) / 2, (lp1.y + lp2.y) / 2];
+      addRiverPoint(p);
+    }
 
-  $("#riverEditor .editButton, #riverEditor .editButtonS").click(function() {
-    if (this.id == "riverRemove") {
+    function addRiverPoint(point) {
+      icons.select(".controlPoints").append("circle")
+        .attr("cx", point[0]).attr("cy", point[1]).attr("r", 0.35)
+        .call(d3.drag().on("drag", riverPointDrag))
+        .on("click", function(d) {
+          $(this).remove();
+          redrawRiver();
+        });
+    }
+
+    function riverPointDrag() {
+      d3.select(this).attr("cx", d3.event.x).attr("cy", d3.event.y);
+      redrawRiver();
+    }
+
+    function riverDrag() {
+      const x = d3.event.x, y = d3.event.y;
+      const tr = parseTransform(elSelected.attr("transform"));
+      d3.event.on("drag", function() {
+        let xc = d3.event.x, yc = d3.event.y;
+        let transform = `translate(${(+tr[0]+xc-x)},${(+tr[1]+yc-y)}) rotate(${tr[2]} ${tr[3]} ${tr[4]}) scale(${tr[5]})`;
+        elSelected.attr("transform", transform);
+        icons.select(".controlPoints").attr("transform", transform);
+      });
+    }
+
+    function redrawRiver() {
+      let points = [];
+      icons.select(".controlPoints").selectAll("circle").each(function() {
+        const el = d3.select(this);
+        points.push([+el.attr("cx"), +el.attr("cy")]);
+      });
+      const width = +riverWidthInput.value;
+      const increment = +riverIncrement.value;
+      const d = drawRiverSlow(points, width, increment);
+      elSelected.attr("d", d);
+    }
+
+    $("#riverWidthInput, #riverIncrement").change(function() {
+      const width = +riverWidthInput.value;
+      const increment = +riverIncrement.value;
+      elSelected.attr("data-width", width).attr("data-increment", increment);
+      redrawRiver();
+    });
+
+    $("#riverRegenerate").click(function() {
+      let points = [], amended = [], x, y, p1, p2;
+      const node = elSelected.node();
+      const l = node.getTotalLength() / 2;
+      const parts = (l / 8) >> 0; // number of points
+      let inc = l / parts; // increment
+      if (inc === Infinity) {inc = l;} // 2 control points for short rivers
+      for (var i = l, e = l; i > 0; i -= inc, e += inc) {
+        p1 = node.getPointAtLength(i);
+        p2 = node.getPointAtLength(e);
+        x = (p1.x + p2.x) / 2, y = (p1.y + p2.y) / 2;
+        points.push([x, y]);
+      }
+      // last point should be accurate
+      p1 = node.getPointAtLength(0);
+      p2 = node.getPointAtLength(l * 2);
+      x = (p1.x + p2.x) / 2, y = (p1.y + p2.y) / 2;
+      points.push([x, y]);
+      // amend points
+      const rndFactor = 0.3 + Math.random() * 1.4; // random factor in range 0.2-1.8
+      for (var i = 0; i < points.length; i++) {
+        x = points[i][0], y = points[i][1];
+        amended.push([x, y]);
+        // add additional semi-random point
+        if (i + 1 < points.length) {
+          const x2 = points[i+1][0], y2 = points[i+1][1];
+          let side = Math.random() > 0.5 ? 1 : -1;
+          const angle = Math.atan2(y2 - y, x2 - x);
+          const serpentine = 2 / (i+1);
+          const meandr = serpentine + 0.3 + Math.random() * rndFactor;
+          x = (x + x2) / 2, y = (y + y2) / 2;
+          x += -Math.sin(angle) * meandr * side;
+          y += Math.cos(angle) * meandr * side;
+          amended.push([x, y]);
+        }
+      }
+      const width = +riverWidthInput.value * 0.6 + Math.random() * 1;
+      const increment = +riverIncrement.value * 0.9 + Math.random() * 0.2;
+      riverWidthInput.value = width;
+      riverIncrement.value = increment;
+      elSelected.attr("data-width", width).attr("data-increment", increment);
+      const d = drawRiverSlow(amended, width, increment);
+      elSelected.attr("d", d).attr("data-width", width).attr("data-increment", increment);
+      icons.select(".controlPoints").selectAll("*").remove();
+      amended.map(function(p) {addRiverPoint(p);});
+    });
+
+    $("#riverAngle").change(function() {
+      const tr = parseTransform(elSelected.attr("transform"));
+      riverAngleValue.innerHTML = Math.abs(+this.value) + "°";
+      var c = elSelected.node().getBBox();
+      const angle = +this.value, scale = +tr[5];
+      const transform = `translate(${tr[0]},${tr[1]}) rotate(${angle} ${(c.x+c.width/2)*scale} ${(c.y+c.height/2)*scale}) scale(${scale})`;
+      elSelected.attr("transform", transform);
+      icons.select(".controlPoints").attr("transform", transform);
+    });
+
+    $("#riverReset").click(function() {
+      elSelected.attr("transform", "");
+      icons.select(".controlPoints").attr("transform", "");
+      riverAngle.value = 0;
+      riverAngleValue.innerHTML = "0°";
+      riverScale.value = 1;
+    });
+
+    $("#riverScale").change(function() {
+      const tr = parseTransform(elSelected.attr("transform"));
+      const scaleOld = +tr[5], scale = +this.value;
+      var c = elSelected.node().getBBox();
+      const cx = c.x + c.width / 2, cy = c.y + c.height / 2;
+      const trX = +tr[0] + cx * (scaleOld - scale);
+      const trY = +tr[1] + cy * (scaleOld - scale);
+      const scX = +tr[3] * scale/scaleOld;
+      const scY = +tr[4] * scale/scaleOld;
+      const transform = `translate(${trX},${trY}) rotate(${tr[2]} ${scX} ${scY}) scale(${scale})`;
+      elSelected.attr("transform", transform);
+      icons.select(".controlPoints").attr("transform", transform);
+    });
+
+    $("#riverNew").click(function() {
+      if ($(this).hasClass('pressed')) {
+        completeNewRiver();
+      } else {
+        // enter creation mode
+        $(".pressed").removeClass('pressed');
+        $(this).addClass('pressed');
+        elSelected.call(d3.drag().on("drag", null));
+        icons.select(".controlPoints").selectAll("*").remove();
+        viewbox.style("cursor", "crosshair").on("click", newRiverAddPoint);
+      }
+    });
+
+    function newRiverAddPoint() {
+      const point = d3.mouse(this);
+      addRiverPoint([point[0], point[1]]);
+      if (elSelected.attr("data-river") !== "new") {
+        const id = +$("#rivers > path").last().attr("id").slice(5) + 1;
+        elSelected = rivers.append("path").attr("data-river", "new").attr("id", "river"+id)
+          .attr("data-width", 2).attr("data-increment", 1).on("click", completeNewRiver);
+      } else {
+        redrawRiver();
+      }
+    }
+
+    function completeNewRiver() {
+      $("#riverNew").removeClass('pressed');
+      restoreDefaultEvents();
+      if (elSelected.attr("data-river") === "new") {
+        redrawRiver();
+        elSelected.attr("data-river", "");
+        elSelected.call(d3.drag().on("start", riverDrag)).on("click", editRiver);
+        const river = +elSelected.attr("id").slice(5);
+        icons.select(".controlPoints").selectAll("circle").each(function() {
+          const x = +d3.select(this).attr("cx");
+          const y = +d3.select(this).attr("cy");
+          const cell = diagram.find(x, y, 3);
+          if (!cell) {return;}
+          if (cells[cell.index].river === undefined) {cells[cell.index].river = r;}
+        });
+      }
+    }
+
+    $("#riverCopy").click(function() {
+      const tr = parseTransform(elSelected.attr("transform"));
+      const d = elSelected.attr("d");
+      let x = 2, y = 2;
+      let transform = `translate(${tr[0]-x},${tr[1]-y}) rotate(${tr[2]} ${tr[3]} ${tr[4]}) scale(${tr[5]})`;
+      while (rivers.selectAll("[transform='" + transform + "'][d='" + d + "']").size() > 0) {
+        x += 2; y += 2;
+        transform = `translate(${tr[0]-x},${tr[1]-y}) rotate(${tr[2]} ${tr[3]} ${tr[4]}) scale(${tr[5]})`;
+      }
+      const river = +$("#rivers > path").last().attr("id").slice(5) + 1;
+      rivers.append("path").attr("d", d)
+        .attr("transform", transform)
+        .attr("id", "river"+river).on("click", editRiver)
+        .attr("data-width", elSelected.attr("data-width"))
+        .attr("data-increment", elSelected.attr("data-increment"));
+      unselect();
+    });
+
+    $("#riverRemove").click(function() {
       alertMessage.innerHTML = `Are you sure you want to remove the river?`;
       $("#alert").dialog({resizable: false, title: "Remove river",
         buttons: {
           Remove: function() {
             $(this).dialog("close");
+            const river = +elSelected.attr("id").slice(5);
+            const avPrec = rn(precipitation / Math.sqrt(cells.length), 2);
+            land.map(function(l) {
+              if (l.river === river) {
+                l.river = undefined;
+                i.flux = avPrec;
+              }
+            });
             elSelected.remove();
-            rivers.select(".riverPoints").remove();
+            unselect();
             $("#riverEditor").dialog("close");
           },
           Cancel: function() {$(this).dialog("close");}
         }
       })
-      return;
-    }
-    if (this.id == "riverCopy") {
-      var tr = parseTransform(elSelected.attr("transform"));
-      var d = elSelected.attr("d");
-      var points = elSelected.attr("data-points");
-      var width = elSelected.attr("data-width");
-      var increment = elSelected.attr("data-increment");
-      var x = 2, y = 2;
-      transform = `translate(${tr[0]-x},${tr[1]-y}) rotate(${tr[2]} ${tr[3]} ${tr[4]}) scale(${tr[5]})`;
-      while (rivers.selectAll("[transform='" + transform + "'][d='" + d + "']").size() > 0) {
-        x += 2; y += 2;
-        transform = `translate(${tr[0]-x},${tr[1]-y}) rotate(${tr[2]} ${tr[3]} ${tr[4]}) scale(${tr[5]})`;
-      }
-      var river = +$("#rivers > path").last().attr("id").slice(5) + 1;
-      rivers.append("path").attr("d", d).attr("data-points", points).attr("transform", transform)
-        .attr("id", "river"+river).on("click", editRiver)
-        .attr("data-width", width).attr("data-increment", increment);
-      return;
-    }
-    if (this.id == "riverRegenerate") {
-      // restore main points
-      var points = JSON.parse(elSelected.attr("data-points"));
-      var riverCells = [], dataRiver = [];
-      for (var p = 0; p < points.length; p++) {
-        var cell = diagram.find(points[p][0], points[p][1], 1);
-        if (cell !== null && cell !== riverCells[riverCells.length-1]) {riverCells.push(cell);}
-      }
-      for (var c = 0; c < riverCells.length; c++) {
-        var rc = riverCells[c];
-        dataRiver.push({x:rc[0], y:rc[1], cell:rc.index});
-      }
-      // if last point not in cell center push it with one extra point
-      var last = points.pop();
-      if (dataRiver[dataRiver.length-1].x !== last[0]) {
-        dataRiver.push({x:last[0], y:last[1], cell:dataRiver[dataRiver.length-1].cell});
-      }
-      var rndFactor = 0.2 + Math.random() * 1.6; // random factor in range 0.2-1.8
-      var riverAmended = amendRiver(dataRiver, rndFactor);
-      lineGen.curve(d3.curveCatmullRom.alpha(0.1));
-      var width = +elSelected.attr("data-width");
-      var increment = +elSelected.attr("data-increment");
-      var d = drawRiver(riverAmended, width, increment);
-      elSelected.attr("d", d).attr("data-points", round(JSON.stringify(riverAmended), 1));
-      rivers.select(".riverPoints").selectAll("*").remove();
-      riverAmended.map(function(p) {addRiverPoint(p);});
-      return;
-    }
-    if (this.id == "riverResize") {$("#riverAngle, #riverAngleValue, #riverScaleIcon, #riverScale, #riverReset").toggle();}
-    if (this.id == "riverWidth") {$("#riverWidthInput, #riverIncrementIcon, #riverIncrement").toggle();}
-    if (this.id == "riverAddPoint" || this.id == "riverRemovePoint" || this.id == "riverNew") {
-      if ($(this).hasClass('pressed')) {
-        $(".pressed").removeClass('pressed');
-        if (elSelected.attr("data-river") == "new") {
-          rivers.select(".riverPoints").selectAll("*").remove();
-          elSelected.attr("data-river", "");
-          elSelected.call(d3.drag().on("start", riverDrag)).classed("draggable", true);
-        }
-        viewbox.style("cursor", "default");
-      } else {
-        $(".pressed").removeClass('pressed');
-        $(this).addClass('pressed');
-        if (this.id == "riverAddPoint" || this.id == "riverNew") {viewbox.style("cursor", "crosshair");}
-        if (this.id == "riverNew") {rivers.select(".riverPoints").selectAll("*").remove();}
-      }
-      return;
-    }
-    if (this.id == "riverReset") {
-      elSelected.attr("transform", "");
-      rivers.select(".riverPoints").attr("transform", "");
-      riverAngle.value = 0;
-      riverAngleValue.innerHTML = "0°";
-      riverScale.value = 1;
-      return;
-    }
-    $("#riverEditor .editButton").toggle();
-    $(this).show().next().toggle();
-  });
-
-  // on riverAngle change
-  $("#riverAngle").change(function() {
-    var tr = parseTransform(elSelected.attr("transform"));
-    riverAngleValue.innerHTML = Math.abs(+this.value) + "°";
-    $(this).attr("title", $(this).val());
-    var c = elSelected.node().getBBox();
-    var angle = this.value;
-    var scale = +tr[5];
-    transform = `translate(${tr[0]},${tr[1]}) rotate(${angle} ${(c.x+c.width/2)*scale} ${(c.y+c.height/2)*scale}) scale(${scale})`;
-    elSelected.attr("transform", transform);
-    rivers.select(".riverPoints").attr("transform", transform);
-  });
-
-  // on riverScale change
-  $("#riverScale").change(function() {
-    var tr = parseTransform(elSelected.attr("transform"));
-    $(this).attr("title", $(this).val());
-    var scaleOld = +tr[5];
-    var scale = +this.value;
-    var c = elSelected.node().getBBox();
-    var cx = c.x+c.width/2;
-    var cy = c.y+c.height/2;
-    var trX = +tr[0] + cx * (scaleOld - scale);
-    var trY = +tr[1] + cy * (scaleOld - scale);
-    var scX = +tr[3] * scale/scaleOld;
-    var scY = +tr[4] * scale/scaleOld;
-    transform = `translate(${trX},${trY}) rotate(${tr[2]} ${scX} ${scY}) scale(${scale})`;
-    elSelected.attr("transform", transform);
-    rivers.select(".riverPoints").attr("transform", transform);
-  });
-
-  // change river width
-  $("#riverWidthInput, #riverIncrement").change(function() {
-    var points = JSON.parse(elSelected.attr("data-points"));
-    lineGen.curve(d3.curveCatmullRom.alpha(0.1));
-    var width = +$("#riverWidthInput").val();
-    var increment = +$("#riverIncrement").val();
-    var d = drawRiver(points, width, increment);
-    elSelected.attr("d", d).attr("data-width", width).attr("data-increment", increment);
-  });
-
-  function riverDrag() {
-    var x = d3.event.x, y = d3.event.y;
-    var el = d3.select(this);
-    var tr = parseTransform(el.attr("transform"));
-    d3.event.on("drag", function() {
-      var xc = d3.event.x, yc = d3.event.y;
-      var transform = `translate(${(+tr[0]+xc-x)},${(+tr[1]+yc-y)}) rotate(${tr[2]} ${tr[3]} ${tr[4]}) scale(${tr[5]})`;
-      el.attr("transform", transform);
-      rivers.select(".riverPoints").attr("transform", transform);
     });
+
+  }
+
+  function unselect() {
+    if (elSelected) {
+      elSelected.call(d3.drag().on("drag", null)).classed("draggable", false);
+      icons.select(".controlPoints").remove();
+      viewbox.style("cursor", "default");
+      elSelected = null;
+    }
   }
 
   function parseTransform(string) {
@@ -1801,15 +2045,212 @@ function fantasyMap() {
     return [a[0] || 0, a[1] || 0, a[2] || 0, a[3] || 0, a[4] || 0, a[5] || 1];
   }
 
-  function redrawRiver() {
-    var points = [];
-    rivers.select(".riverPoints").selectAll("circle").each(function() {
-      var el = d3.select(this);
-      points.push([+el.attr("cx"), +el.attr("cy")]);
+  function editRoute() {
+    if (customization) {return;}
+    if (elSelected) {
+      const self = d3.select(this).attr("id") === elSelected.attr("id") ? true : false;
+      const point = d3.mouse(this);
+      if (elSelected.attr("data-route") === "new") {
+        addRoutePoint({x:point[0], y:point[1]});
+        completeNewRoute();
+        return;
+      } else if (self) {
+        routeAddControlPoint(point);
+        return;
+      }
+    }
+
+    unselect();
+    closeDialogs("#routeEditor, .stable");
+    elSelected = d3.select(this);
+    const controlPoints = icons.append("g").attr("class", "controlPoints");
+    routeDrawPoints();
+
+    // get route type
+    const group = d3.select(this.parentNode);
+    routeUpdateGroups();
+    const routeType = group.attr("id");
+    routeType.value = routeType;
+
+    $("#routeEditor").dialog({
+      title: "Edit Route",
+      minHeight: 30, width: "auto", resizable: false,
+      position: {my: "center top+20", at: "top", of: d3.event},
+      close: function() {
+        if ($("#routeNew").hasClass('pressed')) {completeNewRoute();}
+        if ($("#routeSplit").hasClass('pressed')) {$("#routeSplit").removeClass('pressed');}
+        unselect();
+      }
     });
-    lineGen.curve(d3.curveCatmullRom.alpha(0.1));
-    var d = drawRiver(points);
-    elSelected.attr("d", d).attr("data-points", round(JSON.stringify(points), 1));
+
+    if (modules.editRoute) {return;}
+    modules.editRoute = true;
+
+    function routeAddControlPoint(point) {
+      let dists = [];
+      icons.select(".controlPoints").selectAll("circle").each(function() {
+        const x = +d3.select(this).attr("cx");
+        const y = +d3.select(this).attr("cy");
+        dists.push(Math.hypot(point[0] - x, point[1] - y));
+      });
+      let index = dists.length;
+      if (dists.length > 1) {
+        const sorted = dists.slice(0).sort(function(a, b) {return a-b;});
+        const closest = dists.indexOf(sorted[0]);
+        const next = dists.indexOf(sorted[1]);
+        if (closest <= next) {index = closest+1;} else {index = next+1;}
+      }
+      const before = ":nth-child(" + (index + 1) + ")";
+      icons.select(".controlPoints").insert("circle", before)
+        .attr("cx", point[0]).attr("cy", point[1]).attr("r", 0.35)
+        .call(d3.drag().on("drag", routePointDrag))
+        .on("click", function(d) {
+          $(this).remove();
+          routeRedraw();
+        });
+      routeRedraw();
+    }
+
+    function routeDrawPoints() {
+      const node = elSelected.node();
+      const l = node.getTotalLength();
+      const parts = (l / 5) >> 0; // number of points
+      let inc = l / parts; // increment
+      if (inc === Infinity) {inc = l;} // 2 control points for short routes
+      // draw control points
+      for (var i = 0; i <= l; i += inc) {
+        const p = node.getPointAtLength(i);
+        addRoutePoint(p);
+      }
+    }
+
+    function addRoutePoint(point) {
+      icons.select(".controlPoints").append("circle")
+        .attr("cx", point.x).attr("cy", point.y).attr("r", 0.35)
+        .call(d3.drag().on("drag", routePointDrag))
+        .on("click", function(d) {
+          if ($("#routeSplit").hasClass('pressed')) {
+            routeSplitInPoint(this);
+          } else {
+            $(this).remove();
+            routeRedraw();
+          }
+        });
+    }
+
+    function routePointDrag() {
+      d3.select(this).attr("cx", d3.event.x).attr("cy", d3.event.y);
+      routeRedraw();
+    }
+
+    function routeRedraw() {
+      let points = [];
+      icons.select(".controlPoints").selectAll("circle").each(function() {
+        var el = d3.select(this);
+        points.push({scX: +el.attr("cx"), scY: +el.attr("cy")});
+      });
+      lineGen.curve(d3.curveCatmullRom.alpha(0.1));
+      elSelected.attr("d", lineGen(points));
+    }
+
+    function newRouteAddPoint() {
+      const point = d3.mouse(this);
+      addRoutePoint({x:point[0], y:point[1]});
+      if (elSelected.attr("data-route") !== "new") {
+        const id = routeType + "" + group.selectAll("*").size();
+        elSelected = group.append("path").attr("data-route", "new").attr("id", id).on("click", completeNewRoute);
+      } else {
+        routeRedraw();
+      }
+    }
+
+    function completeNewRoute() {
+      $("#routeNew").removeClass('pressed');
+      restoreDefaultEvents();
+      if (elSelected.attr("data-route") === "new") {
+        routeRedraw();
+        elSelected.attr("data-route", "").on("click", editRoute);
+        const node = elSelected.node();
+        const l = node.getTotalLength();
+        let pathCells = [];
+        for (var i = 0; i <= l; i ++) {
+          const p = node.getPointAtLength(i);
+          const cell = diagram.find(p.x, p.y);
+          if (!cell) {return;}
+          pathCells.push(cell.index);
+        }
+        const uniqueCells = [...new Set(pathCells)];
+        uniqueCells.map(function(c) {
+          if (cells[c].path !== undefined) {cells[c].path += 1;}
+          else {cells[c].path = 1;}
+        });
+      }
+    }
+
+    function routeUpdateGroups() {
+      const type = group.attr("data-type");
+      routeGroup.innerHTML = "";
+      routes.selectAll("g").each(function(d) {
+        const el = d3.select(this);
+        if (el.attr("data-type") !== type) {return;}
+        const opt = document.createElement("option");
+        opt.value = opt.innerHTML = el.attr("id");
+        routeGroup.add(opt);
+      });
+    }
+
+    function routeSplitInPoint(clicked) {
+      $("#routeSplit").removeClass('pressed');
+      let points1 = [], points2 = [];
+      let points = points1;
+      icons.select(".controlPoints").selectAll("circle").each(function() {
+        var el = d3.select(this);
+        points.push({scX: +el.attr("cx"), scY: +el.attr("cy")});
+        if (this === clicked) {
+          points = points2;
+          points.push({scX: +el.attr("cx"), scY: +el.attr("cy")});
+        }
+        el.remove();
+      });
+      lineGen.curve(d3.curveCatmullRom.alpha(0.1));
+      elSelected.attr("d", lineGen(points1));
+      const id = routeType + "" + group.selectAll("*").size();
+      group.append("path").attr("id", id).attr("d", lineGen(points2)).on("click", editRoute);
+      routeDrawPoints();
+    }
+
+    $("#routeGroup").change(function() {
+      const newGroup = this.value;
+      if (routeType === newGroup) {return;}
+      $(elSelected.node()).detach().appendTo($("#"+newGroup));
+      routeType = newGroup;
+    });
+
+    $("#routeNew").click(function() {
+      if ($(this).hasClass('pressed')) {
+        completeNewRoute();
+      } else {
+        // enter creation mode
+        $(".pressed").removeClass('pressed');
+        $(this).addClass('pressed');
+        icons.select(".controlPoints").selectAll("*").remove();
+        viewbox.style("cursor", "crosshair").on("click", newRouteAddPoint);
+      }
+    });
+
+    $("#routeRemove").click(function() {
+      alertMessage.innerHTML = `Are you sure you want to remove the route?`;
+      $("#alert").dialog({resizable: false, title: "Remove route",
+        buttons: {
+          Remove: function() {
+            $(this).dialog("close");
+            elSelected.remove();
+            $("#routeEditor").dialog("close");
+          },
+          Cancel: function() {$(this).dialog("close");}
+        }
+      })
+    });
   }
 
   function manorsAndRegions() {
@@ -1936,14 +2377,14 @@ function fantasyMap() {
 
   // Locate cultures
   function locateCultures() {
-    var cultureCenters = d3.range(7).map(function(d) {return [Math.random() * mapWidth, Math.random() * mapHeight];});
-    cultureTree = d3.quadtree().extent([[0, 0], [mapHeight, mapWidth]]).addAll(cultureCenters);;
+    var cultureCenters = d3.range(7).map(function(d) {return [Math.random() * graphWidth, Math.random() * graphHeight];});
+    cultureTree = d3.quadtree().extent([[0, 0], [graphWidth, graphHeight]]).addAll(cultureCenters);;
   }
 
   function locateCapitals() {
     console.time('locateCapitals');
-    var spacing = mapWidth / capitalsCount;
-    manorTree = d3.quadtree().extent([[0, 0], [mapHeight, mapWidth]]);
+    var spacing = graphWidth / capitalsCount;
+    manorTree = d3.quadtree().extent([[0, 0], [graphWidth, graphHeight]]);
     console.log(" countries: " + capitalsCount);
     for (var l = 0; l < land.length && manors.length < capitalsCount; l++) {
       var m = manors.length;
@@ -1966,7 +2407,7 @@ function fantasyMap() {
       if (l === land.length - 1) {
         console.error("Cannot place capitals with current spacing. Trying again with reduced spacing");
         l = -1, manors = [], queue = [];
-        manorTree = d3.quadtree().extent([[0, 0], [mapHeight, mapWidth]]);
+        manorTree = d3.quadtree().extent([[0, 0], [graphWidth, graphHeight]]);
         spacing /= 1.2;
       }
     }
@@ -2154,6 +2595,7 @@ function fantasyMap() {
       if (portsOnIsland.length) {ports.push(portsOnIsland);}
     }
     ports.sort(function(a, b) {return b.length - a.length;});
+    const anchors = burgs.append("g").attr("id", "anchors");
     for (var i = 0; i < ports.length; i++) {
       var start = ports[i][0].index;
       var paths = findOceanPaths(start, -1);
@@ -2161,7 +2603,8 @@ function fantasyMap() {
       for (var p = 0; p < ports[i].length; p++) {
         var x = ports[i][p].data[0];
         var y = ports[i][p].data[1];
-        icons.append("use").attr("xlink:href", "#icon-anchor").attr("x", x - 0.5).attr("y", y - 0.44).attr("width", 1).attr("height", 1)
+        anchors.append("use").attr("xlink:href", "#icon-anchor")
+          .attr("x", x - 0.5).attr("y", y - 0.44).attr("width", 1).attr("height", 1)
           .call(d3.drag().on("start", elementDrag));
       }
       var length = ports[i].length; // ports on island
@@ -2362,12 +2805,16 @@ function fantasyMap() {
         // draw path segments
         var line = lineGen(path);
         line = round(line, 1);
+        let id = 0; // to create unique route id
         if (type === "main") {
-          roads.append("path").attr("d", line).attr("data-start", start).attr("data-end", end);
+          id = roads.selectAll("path").size();
+          roads.append("path").attr("d", line).attr("id", "road"+id).on("click", editRoute);
         } else if (type === "small") {
-          trails.append("path").attr("d", line);
+          id = trails.selectAll("path").size();
+          trails.append("path").attr("d", line).attr("id", "trail"+id).on("click", editRoute);
         } else if (type === "ocean") {
-          searoutes.append("path").attr("d", line);
+          id = searoutes.selectAll("path").size();
+          searoutes.append("path").attr("d", line).attr("id", "searoute"+id).on("click", editRoute);
         }
       }
       path = [];
@@ -2447,7 +2894,7 @@ function fantasyMap() {
   // Define areas based on the closest manor to a polygon
   function defineRegions() {
     console.time('defineRegions');
-    manorTree = d3.quadtree().extent([[0, 0], [mapHeight, mapWidth]]);
+    manorTree = d3.quadtree().extent([[0, 0], [graphWidth, graphHeight]]);
     manors.map(function(m) {
       if (m.region === "removed") {return;}
       manorTree.add([m.x, m.y]);
@@ -2500,12 +2947,17 @@ function fantasyMap() {
       const start = e[i][0].join(" ");
       const end = e[i][1].join(" ");
       const p = {start, end};
-      if (lr !== undefined && lr !== "neutral") {edges[lr].push(p);}
-      if (rr !== undefined && rr !== "neutral") {edges[rr].push(p);}
-      if (lr === undefined && rr !== "neutral") {coastalEdges[rr].push(p); continue;}
-      if (rr === undefined && lr !== "neutral") {coastalEdges[lr].push(p); continue;}
-      if (lr === "neutral" || rr === "neutral") {neutralEdges.push(p);}
-      else {borderEdges.push(p);}
+      if (Number.isInteger(lr)) {
+        edges[lr].push(p);
+        if (rr === undefined) {coastalEdges[lr].push(p);}
+        else if (rr === "neutral") {neutralEdges.push(p);}
+      }
+      if (Number.isInteger(rr)) {
+        edges[rr].push(p);
+        if (lr === undefined) {coastalEdges[rr].push(p);}
+        else if (lr === "neutral") {neutralEdges.push(p);}
+        else if (Number.isInteger(lr)) {borderEdges.push(p);}
+      }
     }
     edges.map(function(e, i) {
       if (e.length) {
@@ -2688,21 +3140,21 @@ function fantasyMap() {
       var type = styleOverlayType.value;
       var size = +styleOverlaySize.value;
       if (type === "hex") {
-        var hexbin = d3.hexbin().radius(size).size([mapWidth, mapHeight]);
+        var hexbin = d3.hexbin().radius(size).size([svgWidth, svgHeight]);
         overlay.append("path").attr("d", round(hexbin.mesh(), 0));
       } else if (type === "square") {
-        var x = d3.range(size, mapWidth, size);
-        var y = d3.range(size, mapHeight, size);
+        var x = d3.range(size, svgWidth, size);
+        var y = d3.range(size, svgHeight, size);
         overlay.append("g").selectAll("line").data(x).enter().append("line")
           .attr("x1", function(d) {return d;})
           .attr("x2", function(d) {return d;})
-          .attr("y1", 0).attr("y2", mapHeight);
+          .attr("y1", 0).attr("y2", svgHeight);
         overlay.append("g").selectAll("line").data(y).enter().append("line")
           .attr("y1", function(d) {return d;})
           .attr("y2", function(d) {return d;})
-          .attr("x1", 0).attr("x2", mapWidth);
+          .attr("x1", 0).attr("x2", svgWidth);
       } else {
-        var tr = `translate(80 80) scale(${size / 25})`;
+        var tr = `translate(80 80) scale(${size / 20})`;
         d3.select("#rose").attr("transform", tr);
         overlay.append("use").attr("xlink:href","#rose");
       }
@@ -2726,13 +3178,16 @@ function fantasyMap() {
     });
     // restore heightmap layer if it was turned on
     if (!$("#toggleHeight").hasClass("buttonoff") && !terrs.selectAll("path").size()) {toggleHeight();}
-    closeAllDialogs();
+    closeDialogs();
+    // svg.selectAll("path, circle, line, text").attr("vector-effect", "non-scaling-stroke"); // non-scaling-stroke
+    invokeActiveZooming();
     console.timeEnd("cleanData");
   }
 
-  // close all dialogs on re-load
-  function closeAllDialogs() {
-    $(".dialog:visible").each(function(e) {
+  // close all dialogs except stated
+  function closeDialogs(except) {
+    except = except || "#except";
+    $(".dialog:visible").not(except).each(function(e) {
       $(this).dialog("close");
     });
   }
@@ -2922,188 +3377,147 @@ function fantasyMap() {
     console.timeEnd("TOTAL");
   }
 
-  // Mouseclick events
-  function clicked() {
-    var brush = $(".pressed").attr("id");
-    if (customization !== 1 && brush === "brushHill") {
-      $("#"+brush).removeClass("pressed");
-      brush = $(".pressed").attr("id");
-    }
-    if (customization === 2) {
-      var cell = diagram.find(x, y).index;
-      var assigned = regions.select("#temp").select("path[data-cell='"+cell+"']");
-      if (assigned.size()) {var s = assigned.attr("data-state");} else {var s = cells[cell].region;}
-      if (s === "neutral") {s = states.length - 1;}
-      $(".selected").removeClass("selected");
-      $("#state"+s).addClass("selected");
-    }
-    if (!brush) {return;}
-    var point = d3.mouse(this);
-    if ($("#riverAddPoint").hasClass('pressed')) {
-      var dists = [], points = [];
-      var tr = parseTransform(elSelected.attr("transform"));
-      if (tr[5] == "1") {
-        point[0] -= +tr[0];
-        point[1] -= +tr[1];
+  // Add support "click to add" button events
+  $("#customizeTab").click(function() {clickToAdd()});
+  function clickToAdd() {
+    if (modules.clickToAdd) {return;}
+    modules.clickToAdd = true;
+
+    // add label on click
+    $("#addLabel").click(function() {
+      if ($(this).hasClass('pressed')) {
+        $(".pressed").removeClass('pressed');
+        restoreDefaultEvents();
+      } else {
+        $(".pressed").removeClass('pressed');
+        $(this).addClass('pressed');
+        closeDialogs(".stable");
+        viewbox.style("cursor", "crosshair").on("click", addLabelOnClick);
       }
-      rivers.select(".riverPoints").selectAll("circle").each(function() {
-        var x = +d3.select(this).attr("cx");
-        var y = +d3.select(this).attr("cy");
-        dists.push(Math.hypot(point[0] - x, point[1] - y));
-        points.push([x, y]);
-      }).remove();
-      var index = dists.length;
-      if (points.length > 1) {
-        var sorted = dists.slice(0).sort(function(a, b) {return a-b;});
-        var closest = dists.indexOf(sorted[0]);
-        var next = dists.indexOf(sorted[1]);
-        if (closest <= next) {index = closest+1;} else {index = next+1;}
-      }
-      points.splice(index, 0, [point[0], point[1]]);
-      lineGen.curve(d3.curveCatmullRom.alpha(0.1));
-      var d = drawRiver(points, 2, 1);
-      elSelected.attr("d", d).attr("data-points", round(JSON.stringify(points), 1));
-      points.map(function(p) {addRiverPoint(p)});
-      return;
-    }
-    if ($("#riverNew").hasClass('pressed')) {
-      if (elSelected.attr("data-river") !== "new") {
-        elSelected.call(d3.drag().on("drag", null)).classed("draggable", false);
-        var river = +$("#rivers > path").last().attr("id").slice(5) + 1;
-        elSelected = rivers.append("path").attr("data-river", "new").attr("id", "river"+river)
-          .attr("data-width", 2).attr("data-increment", 1).on("click", editRiver);
-      }
-      addRiverPoint({scX:point[0], scY:point[1]});
-      redrawRiver();
-      return;
-    }
-    if (brush === "addLabel" || brush === "addBurg" || brush.includes("selectCapital")) {
-      var cell = diagram.find(x, y).index;
-      if (!cell) {return;}
-      var x = rn(point[0], 2), y = rn(point[1], 2);
+    });
+
+    function addLabelOnClick() {
+      const point = d3.mouse(this);
+      const index = getIndex(point);
+      const x = rn(point[0], 2), y = rn(point[1], 2);
+
       // get culture in clicked point to generate a name
-      var closest = cultureTree.find(x, y);
-      var culture = cultureTree.data().indexOf(closest) || 0;
-      var name = generateName(culture);
-      // please label
-      if (brush === "addLabel") {
-        var group = labels.select("#addedLabels");
-        if (!group.size()) {
-          group = labels.append("g").attr("id", "addedLabels").attr("fill", "#3e3e4b").attr("opacity", 1)
-            .attr("font-family", "Amatic SC").attr("data-font", "Amatic+SC:700").attr("font-size", 18).attr("data-size", 18);
-        }
-        group.append("text").attr("x", x).attr("y", y).text(name).on("click", editLabel);
-        if (!shift) {
-          $("#"+brush).removeClass("pressed");
-          viewbox.style("cursor", "default");
-        }
-        return;
+      const closest = cultureTree.find(x, y);
+      const culture = cultureTree.data().indexOf(closest) || 0;
+      const name = generateName(culture);
+
+      let group = labels.select("#addedLabels");
+      if (!group.size()) {
+        group = labels.append("g").attr("id", "addedLabels")
+          .attr("fill", "#3e3e4b").attr("opacity", 1)
+          .attr("font-family", "Almendra SC").attr("data-font", "Almendra+SC")
+          .attr("font-size", 18).attr("data-size", 18);
       }
-      if (brush === "addBurg") {
-        if (cells[cell].height < 0.2) {
-          console.error("Cannot place burg in the water! Select a land cell");
-          return;
-        }
-        if (cells[cell].manor !== undefined) {
-          console.error("There is already a burg in this cell. Select a free cell");
-          return;
-        }
-        var i = manors.length;
-        burgs.append("circle").attr("id", "manorIcon"+i).attr("r", .5).attr("stroke-width", .12).attr("cx", x).attr("cy", y).call(d3.drag().on("start", elementDrag));
-        var group = labels.select("#addedBurgs");
-        if (!group.size()) {
-          group = labels.append("g").attr("id", "addedBurgs").attr("fill", "#3e3e4b").attr("opacity", 1)
-            .attr("font-family", "Amatic SC").attr("data-font", "Amatic+SC:700").attr("font-size", 4).attr("data-size", 4);
-        }
-        group.append("text").attr("id", "manorLabel"+i).attr("x", x).attr("y", y).attr("dy", -0.7).text(name).on("click", editLabel);
-        invokeActiveZooming();
-        var region, state = +$("#addBurg").attr("data-state");
-        if (state !== -1) {
-          region = states[state].capital === "neutral" ? "neutral" : state;
-          var oldRegion = cells[cell].region;
-          if (region !== oldRegion) {
-            cells[cell].region = region;
-            redrawRegions();
-          }
-        } else {
-          region = cells[cell].region;
-          state = region === "neutral" ? states.length - 1 : region;
-        }
-        cells[cell].manor = i;
-        var score = cells[cell].score;
-        if (score <= 0) {score = rn(Math.random(), 2);}
-        if (cells[cell].crossroad) {score += cell.crossroad;} // crossroads
-        if (cells[cell].confluence) {score += Math.pow(cell.confluence, 0.3);} // confluences
-        if (cells[cell].port) {score *= 3;} // port-capital
-        var population = rn(score, 1);
-        manors.push({i, cell, x, y, region, culture, name, population});
-        recalculateStateData(state);
-        updateCountryEditors();
-        if (!shift) {
-          $("#"+brush).removeClass("pressed");
-          $("#burgAdd").removeClass("pressed");
-          viewbox.style("cursor", "default");
-        }
-        return;
+      group.append("text").attr("x", x).attr("y", y).text(name).on("click", editLabel);
+
+      if (d3.event.shiftKey === false) {
+        $("#addLabel").removeClass("pressed");
+        restoreDefaultEvents();
       }
-      if (brush.includes("selectCapital")) {
-        if (cells[cell].height < 0.2) {
-          console.error("Cannot place capital in the water! Select a land cell");
-          return;
-        }
-        var state = +brush.replace("selectCapital", "");
-        var oldState = cells[cell].region;
-        if (oldState === "neutral") {oldState = states.length - 1;}
-        if (cells[cell].manor !== undefined) {
-          var burg = cells[cell].manor;
-          if (states[oldState].capital === burg) {
-            console.error("Existing capital cannot be selected as a new state capital! Select other cell");
-            return;
-          } else {
-            // make capital from existing burg
-            var urbanFactor = 0.9; // for old neutrals
-            manors[burg].region = state;
-            if (oldState === "neutral") {manors[burg].population *= (1 / urbanFactor);}
-            manors[burg].population *= 2; // give capital x2 population bonus
-            states[state].capital = burg;
-            $("#manorLabel"+burg).detach().appendTo($("#capitals")).attr("dy", -1.3);
-            $("#manorIcon"+burg).attr("r", 1).attr("stroke-width", .24);
-          }
-        } else {
-          // create new burg for capital
-          var i = manors.length;
-          cells[cell].manor = i;
-          states[state].capital = i;
-          var score = cells[cell].score;
-          if (score <= 0) {score = rn(Math.random(), 2);}
-          if (cells[cell].crossroad) {score += cell.crossroad;} // crossroads
-          if (cells[cell].confluence) {score += Math.pow(cell.confluence, 0.3);} // confluences
-          if (cells[cell].port) {score *= 3;} // port-capital
-          var population = rn(score, 1);
-          manors.push({i, cell, x, y, region: state, culture, name, population});
-          burgs.append("circle").attr("id", "manorIcon"+i).attr("r", 1).attr("stroke-width", .24).attr("cx", x).attr("cy", y).call(d3.drag().on("start", elementDrag));
-          capitals.append("text").attr("id", "manorLabel"+i).attr("id", "manorLabel"+i).attr("x", x).attr("y", y).attr("dy", -1.3).text(name).on("click", editLabel);
-        }
-        cells[cell].region = state;
-        cells[cell].neighbors.map(function(n) {
-          if (cells[n].height < 0.2) {return;}
-          if (cells[n].manor !== undefined) {return;}
-          cells[n].region = state;
-        });
-        redrawRegions();
-        recalculateStateData(oldState); // re-calc old state data
-        recalculateStateData(state); // calc new state data
-        editCountries();
-        $("#"+brush).removeClass("pressed");
-      }
-      return;
     }
-    if (brush === "addRiver") {
+
+    // add burg on click
+    $("#addBurg").click(function() {
+      if ($(this).hasClass('pressed')) {
+        $(".pressed").removeClass('pressed');
+        restoreDefaultEvents();
+      } else {
+        $(".pressed").removeClass('pressed');
+        $(this).attr("data-state", -1).addClass('pressed');
+        $("#burgAdd").addClass('pressed');
+        closeDialogs(".stable");
+        viewbox.style("cursor", "crosshair").on("click", addBurgOnClick);
+      }
+    });
+
+    function addBurgOnClick() {
+      const point = d3.mouse(this);
+      const index = getIndex(point);
+      const x = rn(point[0], 2), y = rn(point[1], 2);
+
+      // get culture in clicked point to generate a name
+      const closest = cultureTree.find(x, y);
+      const culture = cultureTree.data().indexOf(closest) || 0;
+      const name = generateName(culture);
+
+      if (cells[index].height < 0.2) {
+        console.error("Cannot place burg in the water! Select a land cell");
+        return;
+      }
+      if (cells[index].manor !== undefined) {
+        console.error("There is already a burg in this cell. You have to select a free cell");
+        return;
+      }
+      var i = manors.length;
+      burgs.append("circle").attr("id", "manorIcon"+i).attr("r", .5).attr("stroke-width", .12)
+        .attr("cx", x).attr("cy", y).call(d3.drag().on("start", elementDrag));
+      var group = labels.select("#addedBurgs");
+      if (!group.size()) {
+        group = labels.append("g").attr("id", "addedBurgs")
+          .attr("fill", "#3e3e4b").attr("opacity", 1)
+          .attr("font-family", "Almendra SC").attr("data-font", "Almendra+SC")
+          .attr("font-size", 4).attr("data-size", 4);
+      }
+      group.append("text").attr("id", "manorLabel"+i).attr("x", x).attr("y", y).attr("dy", -0.7).text(name).on("click", editLabel);
+      invokeActiveZooming();
+
+      if (d3.event.shiftKey === false) {
+        $("#addBurg, #burgAdd").removeClass("pressed");
+        restoreDefaultEvents();
+      }
+
+      var region, state = +$("#addBurg").attr("data-state");
+      if (state !== -1) {
+        region = states[state].capital === "neutral" ? "neutral" : state;
+        var oldRegion = cells[index].region;
+        if (region !== oldRegion) {
+          cells[index].region = region;
+          redrawRegions();
+        }
+      } else {
+        region = cells[index].region;
+        state = region === "neutral" ? states.length - 1 : region;
+      }
+      cells[index].manor = i;
+      let score = cells[index].score;
+      if (score <= 0) {score = rn(Math.random(), 2);}
+      if (cells[index].crossroad) {score += cells[index].crossroad;} // crossroads
+      if (cells[index].confluence) {score += Math.pow(cells[index].confluence, 0.3);} // confluences
+      if (cells[index].port) {score *= 3;} // port-capital
+      var population = rn(score, 1);
+      manors.push({i, cell:index, x, y, region, culture, name, population});
+      recalculateStateData(state);
+      updateCountryEditors();
+    }
+
+    // add river on click
+    $("#addRiver").click(function() {
+      if ($(this).hasClass('pressed')) {
+        $(".pressed").removeClass('pressed');
+        unselect();
+        restoreDefaultEvents();
+      } else {
+        $(".pressed").removeClass('pressed');
+        unselect();
+        $(this).addClass('pressed');
+        closeDialogs(".stable");
+        viewbox.style("cursor", "crosshair").on("click", addRiverOnClick);
+      }
+    });
+
+    function addRiverOnClick() {
+      var point = d3.mouse(this);
       var index = diagram.find(point[0], point[1]).index;
       var cell = cells[index];
       if (cell.river || cell.height < 0.2) {return;}
       var dataRiver = []; // to store river points
-      var river = +$("#rivers > path").last().attr("id").slice(5) + 1;
+      const last = $("#rivers > path").last();
+      const river = last.length ? +last.attr("id").slice(5) + 1 : 0;
       cell.flux = 0.85;
       while (cell) {
         cell.river = river;
@@ -3120,24 +3534,41 @@ function fantasyMap() {
           dataRiver.push({x: px, y: py, cell:index});
           cell = undefined;
         } else {
-          if (!cells[min].river) {cells[min].flux += cell.flux; cell = cells[min];}
-          if (cells[min].river) {
-            var r = cells[min].river;
-            var riverEl = $("#river"+r);
-            var points = JSON.parse(riverEl.attr("data-points"));
-            var riverCells = [];
-            for (var p = 0; p < points.length; p++) {
-              var c = diagram.find(points[p].scX, points[p].scY, 5);
-              if (c === null) {continue;}
-              if (c.index !== riverCells[riverCells.length-1]) {riverCells.push(c.index);}
-            }
-            if (dataRiver.length > riverCells.indexOf(min)) {
-              cells[min].flux = cell.flux + cells[min].flux / 2;
+          if (cells[min].river === undefined) {cells[min].flux += cell.flux; cell = cells[min];}
+          else {
+            const r = cells[min].river;
+            const riverEl = $("#river"+r);
+            const riverCells = $.grep(land, function(e) {return e.river === r;});
+            riverCells.sort(function(a, b) {return b.height - a.height});
+            const riverCellsUpper = $.grep(riverCells, function(e) {return e.height > cells[min].height;});
+            if (dataRiver.length > riverCellsUpper.length) {
+              // new river is more perspective
+              const avPrec = rn(precipitation / Math.sqrt(cells.length), 2);
+              let dataRiverMin = [];
+              riverCells.map(function(c) {
+                if (c.height < cells[min].height) {
+                  cells[c.index].river = undefined;
+                  cells[c.index].flux = avPrec;
+                } else {
+                  dataRiverMin.push({x:c.data[0], y:c.data[1], cell:c.index});
+                }
+              });
+              cells[min].flux += cell.flux;
+              if (cells[min].confluence) {cells[min].confluence += riverCellsUpper.length;}
+              else {cells[min].confluence = riverCellsUpper.length;}
               cell = cells[min];
-              riverEl.remove();
-              cells.map(function(c) {if (c.river === r) {c.river = undefined;}})
+              // redraw old river's upper part or remove if small
+              if (dataRiverMin.length > 1) {
+                var riverAmended = amendRiver(dataRiverMin, 1);
+                var d = drawRiver(riverAmended, 1.3, 1);
+                riverEl.attr("d", d).attr("data-width", 1.3).attr("data-increment", 1);
+              } else {
+                riverEl.remove();
+                dataRiverMin.map(function(c) {cells[c.cell].river = undefined;});
+              }
             } else {
-              cells[min].confluence += dataRiver.length;
+              if (cells[min].confluence) {cells[min].confluence += dataRiver.length;}
+              else {cells[min].confluence = dataRiver.length;}
               cells[min].flux += cell.flux;
               dataRiver.push({x: tx, y: ty, cell:min});
               cell = undefined;
@@ -3147,32 +3578,20 @@ function fantasyMap() {
       }
       var rndFactor = 0.2 + Math.random() * 1.6; // random factor in range 0.2-1.8
       var riverAmended = amendRiver(dataRiver, rndFactor);
-      lineGen.curve(d3.curveCatmullRom.alpha(0.1));
-      var d = drawRiver(riverAmended, 2, 1);
+      var d = drawRiver(riverAmended, 1.3, 1);
       rivers.append("path").attr("d", d).attr("id", "river"+river)
-        .attr("data-points", round(JSON.stringify(riverAmended), 1))
-        .attr("data-width", 2).attr("data-increment", 1).on("click", editRiver);
+        .attr("data-width", 1.3).attr("data-increment", 1).on("click", editRiver);
+    }
+  }
+
+  // return cell / polly Index or error
+  function getIndex(point) {
+    const c = diagram.find(point[0], point[1]);
+    if (!c) {
+      console.error("Cannot find closest cell for points" + point[0] + ", " + point[1]);
       return;
     }
-    if (customization === 1) {
-      var cell = diagram.find(point[0], point[1]).index;
-      var power = +brushPower.value;
-      if (brush === "brushHill") {add(cell, "hill", power);}
-      if (brush === "brushPit") {addPit(1, power, cell);}
-      if (brush === "brushRange" || brush === "brushTrough") {
-        if (icons.selectAll(".tag").size() === 0) {
-          icons.append("circle").attr("r", 3).attr("class", "tag").attr("cx", point[0]).attr("cy", point[1]);
-        } else {
-          var x = +icons.select(".tag").attr("cx");
-          var y = +icons.select(".tag").attr("cy");
-          var from = diagram.find(x, y).index;
-          icons.selectAll(".tag, .line").remove();
-          addRange(brush === "brushRange" ? 1 : -1, power, from, cell);
-        }
-      }
-      updateCellsInRadius(cell, cell);
-      mockHeightmap();
-    }
+    return index = c.index;
   }
 
   // re-calculate data for a particular state
@@ -3199,9 +3618,11 @@ function fantasyMap() {
   }
 
   function editLabel() {
-    unselect();
+    if (customization) {return;}
+    closeDialogs("#labelEditor, .stable");
     elSelected = d3.select(this);
     elSelected.call(d3.drag().on("drag", dragged).on("end", dragended)).classed("draggable", true);
+
     var group = d3.select(this.parentNode);
     updateGroupOptions();
     editGroupSelect.value = group.attr("id");
@@ -3211,26 +3632,46 @@ function fantasyMap() {
     editOpacity.value = group.attr("opacity");
     editText.value = elSelected.text();
     var matrix = elSelected.attr("transform");
-    if (matrix) {
-      var rotation = matrix.split('(')[1].split(')')[0].split(' ')[0];
-    } else {
-      var rotation = 0;
-    }
+    var rotation = matrix ?  matrix.split('(')[1].split(')')[0].split(' ')[0] : 0;
     editAngle.value = rotation;
     editAngleValue.innerHTML = rotation + "°";
+
     $("#labelEditor").dialog({
       title: "Edit Label: " + editText.value,
       minHeight: 30, width: "auto", maxWidth: 275, resizable: false,
-      position: {my: "center top", at: "bottom", of: this}
-    }).on("dialogclose", function() {unselect();});
-    fetchAdditionalFonts();
+      position: {my: "center top+10", at: "bottom", of: this},
+      close: unselect
+    });
+
+    if (modules.editLabel) {return;}
+    modules.editLabel = true;
+
+    $("#editFontButton").click(fetchAdditionalFonts);
+  }
+
+  function changeSelectedStateOnClick() {
+    var point = d3.mouse(this);
+    var index = diagram.find(point[0], point[1]).index;
+    var assigned = regions.select("#temp").select("path[data-cell='"+index+"']");
+    if (assigned.size()) {var s = assigned.attr("data-state");} else {var s = cells[index].region;}
+    if (s === "neutral") {s = states.length - 1;}
+    let color = states[s].color;
+    if (color === "neutral") {color = "white"}
+    $(".selected").removeClass("selected");
+    $("#state"+s).addClass("selected");
+    icons.selectAll(".circle").attr("stroke", states[s].color);
   }
 
   // fetch default fonts if not done before
   function fetchAdditionalFonts() {
-    if (fonts.indexOf("Bitter") === -1) {
+    if (fonts.length < 10) {
       $("head").append('<link rel="stylesheet" type="text/css" href="fonts.css">');
-      fonts = fonts.concat(["IM+Fell+English", "Great+Vibes", "Bitter", "Yellowtail", "Montez", "Lobster", "Josefin+Sans", "Shadows+Into+Light", "Orbitron", "Dancing+Script:700", "Bangers", "Chewy", "Architects+Daughter", "Kaushan+Script", "Gloria+Hallelujah", "Satisfy", "Comfortaa:700", "Cinzel"]);
+      const artistic = ["Almendra+SC", "Amatic+SC:700", "IM+Fell+English", "Great+Vibes", "MedievalSharp", "Metamorphous",
+                        "Nova+Script", "Uncial+Antiqua", "Underdog", "Caesar+Dressing", "Bitter", "Yellowtail", "Montez",
+                        "Shadows+Into+Light", "Fredericka+the+Great", "Orbitron", "Dancing+Script:700",
+                        "Architects+Daughter", "Kaushan+Script", "Gloria+Hallelujah", "Satisfy", "Comfortaa:700", "Cinzel"];
+      const webSafe = ["Georgia", "Times+New+Roman", "Comic+Sans+MS", "Lucida+Sans+Unicode", "Courier+New"];
+      fonts = artistic.concat(webSafe);
       updateFontOptions();
     }
   }
@@ -3365,15 +3806,18 @@ function fantasyMap() {
   // on editFontInput change. Use a direct link to any @font-face declaration or just font name to fetch from Google Fonts
   $("#editFontInput").change(function() {
     if (editFontInput.value !== "") {
-      var url = (editFontInput.value).replace(/ /g, "+");
-      if (url.indexOf("http") === -1) {url = "https://fonts.googleapis.com/css?family=" + url;}
-      addFonts(url);
+      var url = editFontInput.value;
+      if (url.indexOf("http") === -1) {
+        url = url.replace(url.charAt(0), url.charAt(0).toUpperCase()).split(" ").join("+");
+        url = "https://fonts.googleapis.com/css?family=" + url;
+      }
+      addFonts(url, "autoselect");
       editFontInput.value = "";
       editExternalFont.click();
     }
   });
 
-  function addFonts(url) {
+  function addFonts(url, autoselect) {
     $('head').append('<link rel="stylesheet" type="text/css" href="' + url + '">');
     return fetch(url)
       .then(resp => resp.text())
@@ -3393,6 +3837,14 @@ function fantasyMap() {
         for (var r of styleSheet.cssRules) {FontRule(r);}
         document.head.removeChild(s);
         updateFontOptions();
+        // apply the last of added fonts
+        if (autoselect) {
+          const num = $("#editFontSelect option").length - 1;
+          $("#editFontSelect").prop("selectedIndex", num);
+          const group = d3.select(elSelected.node().parentNode);
+          const font = fonts[editFontSelect.value].split(':')[0].replace(/\+/g, " ");
+          group.attr("font-family", font).attr("data-font", fonts[editFontSelect.value]);
+        }
       })
   }
 
@@ -3537,7 +3989,7 @@ function fantasyMap() {
     clone.select("#labels").selectAll(".hidden").each(function(e) {
       // show hidden labels but in reduced size
       var size = d3.select(this).attr("font-size");
-      d3.select(this).classed("hidden", false).attr("font-size", rn(size * 0.8, 2));
+      d3.select(this).classed("hidden", false).attr("font-size", rn(size * 0.4, 2));
     });
     clone.selectAll("g, #ruler > g > *, #scaleBar > text").each(function(d) {
       var compStyle = window.getComputedStyle(this);
@@ -3568,7 +4020,7 @@ function fantasyMap() {
       var link = document.createElement("a");
       link.target = "_blank";
       if (type === "png") {
-        var ratio = mapHeight / mapWidth;
+        var ratio = svgHeight / svgWidth;
         canvas.width = 3840; // ultraHD
         canvas.height = rn(3840 * ratio);
         var img = new Image();
@@ -3584,8 +4036,8 @@ function fantasyMap() {
              window.setTimeout(function() {window.URL.revokeObjectURL(link.href);}, 5000);
           });
           canvas.style.opacity = 0;
-          canvas.width = mapWidth;
-          canvas.height = mapHeight;
+          canvas.width = svgWidth;
+          canvas.height = svgHeight;
         }
       } else {
         link.download = "fantasy_map_" + Date.now() + ".svg";
@@ -3593,7 +4045,6 @@ function fantasyMap() {
         document.body.appendChild(link);
         link.click();
       }
-      document.body.removeChild(link);
       console.timeEnd("saveAsImage");
       window.setTimeout(function() {window.URL.revokeObjectURL(url);}, 5000);
     });
@@ -3652,6 +4103,13 @@ function fantasyMap() {
     console.time("saveMap");
     // data convention: 0 - version; 1 - all points; 2 - cells; 3 - manors; 4 - states; 5 - svg; 6 - options;
     // size stats: points = 6%, cells = 36%, manors and states = 2%, svg = 56%;
+    svg.attr("width", graphWidth).attr("height", graphHeight);
+    const transform = viewbox.attr("transform");
+    viewbox.attr("transform", "");
+    const oceanBack = ocean.select("rect");
+    const oceanShift = [oceanBack.attr("x"), oceanBack.attr("y"), oceanBack.attr("width"), oceanBack.attr("height")];
+    oceanBack.attr("x", 0).attr("y", 0).attr("width", "100%").attr("height", "100%");
+
     var svg_xml = (new XMLSerializer()).serializeToString(svg.node());
     var line = "\r\n";
     var data = version + line + JSON.stringify(points) + line + JSON.stringify(cells) + line;
@@ -3662,98 +4120,120 @@ function fantasyMap() {
     link.download = "fantasy_map_" + Date.now() + ".map";
     link.href = dataURL;
     document.body.appendChild(link);
+    allowResize = false;
     link.click();
+
+    // restore initial values
+    svg.attr("width", svgWidth).attr("height", svgHeight);
+    viewbox.attr("transform", transform);
+    oceanBack.attr("x", oceanShift[0]).attr("y", oceanShift[1]).attr("width", oceanShift[2]).attr("height", oceanShift[3]);
+
     console.timeEnd("saveMap");
-    window.setTimeout(function() {window.URL.revokeObjectURL(dataURL);}, 5000);
+    window.setTimeout(function() {window.URL.revokeObjectURL(dataURL);}, 4000);
   }
 
   // Map Loader based on FileSystem API
   $("#mapToLoad").change(function() {
     console.time("loadMap");
-    closeAllDialogs();
+    closeDialogs();
     var fileToLoad = this.files[0];
     this.value = "";
+    uploadFile(fileToLoad);
+  });
+
+  function uploadFile(file, callback) {
+    console.time("loadMap");
     var fileReader = new FileReader();
     fileReader.onload = function(fileLoadedEvent) {
       var dataLoaded = fileLoadedEvent.target.result;
       var data = dataLoaded.split("\r\n");
-
       // data convention: 0 - version; 1 - all points; 2 - cells; 3 - manors; 4 - states; 5 - svg; 6 - options;
       var mapVersion = data[0];
       if (mapVersion !== version) {
         var message = `The Map version `;
         // mapVersion reference was not added to downloaded map before v. 0.52b, so I cannot support really old files
         if (mapVersion.length <= 10) {
-          message += ` (${mapVersion}) `;
-          message += `does not match the Generator version (${version}). The map will be auto-updated. In case of critical issues you may send the .map file  `;
-          message += `<a href="mailto:maxganiev@yandex.ru?Subject=Map%20update%20request" target="_top">to me</a>`;
-          message += ` or just keep using `
-          message += `<a href="https://github.com/Azgaar/Fantasy-Map-Generator/wiki/Changelog" target="_blank">an appropriate version</a>`;
-          message += ` of the Generator`;
+          message +=  `(${mapVersion})
+                      does not match the Generator version (${version}). The map will be auto-updated.
+                      In case of critical issues you may send the .map file
+                      <a href="mailto:maxganiev@yandex.ru?Subject=Map%20update%20request" target="_top">to me</a>
+                      or just keep using
+                      <a href="https://github.com/Azgaar/Fantasy-Map-Generator/wiki/Changelog" target="_blank">an appropriate version</a>
+                      of the Generator`;
         } else {
-          message += `  you are trying to load is too old and cannot be updated. `;
-          message += `Please re-create the map or just keep using `;
-          message += `<a href="https://github.com/Azgaar/Fantasy-Map-Generator/wiki/Changelog" target="_blank">an archived version</a>`;
-          message += ` of the Generator. Please note the Gennerator is still on demo and a lot of crusial changes are made every month`;
+          message += `you are trying to load is too old and cannot be updated.
+                      Please re-create the map or just keep using
+                      <a href="https://github.com/Azgaar/Fantasy-Map-Generator/wiki/Changelog" target="_blank">an archived version</a>
+                      of the Generator. Please note the Gennerator is still on demo and a lot of crusial changes are made every month`;
         }
         alertMessage.innerHTML = message;
-        $("#alert").dialog({title: "Map version conflict", buttons: {OK: function() {$(this).dialog("close");}}});
-      }
+        $("#alert").dialog({title: "Map version conflict", buttons: {OK: function() {
+          $(this).dialog("close");
+          loadDataFromMap(data);
+        }}});
+      } else {loadDataFromMap(data);}
       if (mapVersion.length > 10) {console.error("Cannot load map"); return;}
+    }
+    fileReader.readAsText(file, "UTF-8");
+    if (callback) {callback();}
+  }
 
-      // replace svg
-      svg.remove();
-      if (mapVersion === "0.52b" || mapVersion === "0.53b") {
-        states = []; // no states data
-        document.body.insertAdjacentHTML("afterbegin", data[4]);
-        customization = 0;
-      } else {
-        states = JSON.parse(data[4]);
-        document.body.insertAdjacentHTML("afterbegin", data[5]);
-        customization = +data[6] || 0;
-      }
+  function loadDataFromMap(data) {
+    // replace old svg
+    svg.remove();
+    if (data[0] === "0.52b" || data[0] === "0.53b") {
+      states = []; // no states data
+      document.body.insertAdjacentHTML("afterbegin", data[4]);
+      customization = 0;
+    } else {
+      states = JSON.parse(data[4]);
+      document.body.insertAdjacentHTML("afterbegin", data[5]);
+      customization = +data[6] || 0;
+    }
 
-      svg = d3.select("svg");
-      // check map size
-      const nWidth = +svg.attr("width"), nHeight = +svg.attr("height");
-      // temporary fit svg element to current canvas size
-      svg.attr("width", mapWidth).attr("height", mapHeight);
-      if (nWidth !== mapWidth || nHeight !== mapHeight) {
-        let message = `The loaded map has size ${nWidth} x ${nHeight} pixels, `
-        message += `while the current canvas size is ${mapWidthInput.value} x ${mapHeightInput.value} pixels. `;
-        message += `You should change the canvas size to fit the loaded map. `;
-        message += `You may also keep the current size, but it can cause issues`;
-        alertMessage.innerHTML = message;
-        $("#alert").dialog({title: "Map size conflict",
-          buttons: {
-            Change: function() {
-              mapWidthInput.value = nWidth;
-              mapHeightInput.value = nHeight;
-              changeMapSize();
-              if ($("body").hasClass("fullscreen")) {
-                $("svg").addClass("fullscreen");
-                $("#mapScreenSize").removeClass("icon-resize-full-alt").addClass("icon-resize-small");
-              } else {
-                $("svg").removeClass("fullscreen");
-                $("#mapScreenSize").addClass("icon-resize-full-alt").removeClass("icon-resize-small");
-              }
-              applyLoadedData(data);
-              $(this).dialog("close");
-            },
-            Keep: function() {
-              voronoi = d3.voronoi().extent([[0, 0], [nWidth, nHeight]]);
-              zoom.translateExtent([[0, 0], [nWidth, nHeight]]);
-              applyLoadedData(data);
-              $(this).dialog("close");
-            }
+    svg = d3.select("svg");
+    // check map size
+    const nWidth = +svg.attr("width"), nHeight = +svg.attr("height");
+    // temporary fit svg element to current canvas size
+    svg.attr("width", svgWidth).attr("height", svgHeight);
+    if (nWidth !== svgWidth || nHeight !== svgHeight) {
+      alertMessage.innerHTML  = `The loaded map has size ${nWidth} x ${nHeight} pixels,
+                                while the current canvas size is ${svgWidth} x ${svgHeight} pixels.
+                                You may either fit the loaded map to the current window
+                                or resize the canvas to ${nWidth} x ${nHeight} pixels`;
+      $("#alert").dialog({title: "Map size conflict",
+        buttons: {
+          "Fit": function() {
+            voronoi = d3.voronoi().extent([[0, 0], [nWidth, nHeight]]);
+            graphWidth = nWidth;
+            graphHeight = nHeight;
+            applyLoadedData(data);
+            // rescale loaded map
+            const xRatio = svgWidth / nWidth;
+            const yRatio = svgHeight / nHeight;
+            const scaleTo = rn(Math.min(xRatio, yRatio), 2);
+            // calculate frames to scretch ocean background
+            const extent = (100 / scaleTo) + "%";
+            const xShift = (nWidth * scaleTo - svgWidth) / 2 / scaleTo;
+            const yShift = (nHeight * scaleTo - svgHeight) / 2 / scaleTo;
+            ocean.selectAll("rect").attr("x", xShift).attr("y", yShift).attr("width", extent).attr("height", extent);
+            initView = [scaleTo, 0, 0];
+            zoom.translateExtent([[0, 0], [nWidth, nHeight]]).scaleExtent([scaleTo, 20]).scaleTo(svg, scaleTo);
+            $(this).dialog("close");
+          },
+          "Resize": function() {
+            mapWidthInput.value = graphWidth = nWidth;
+            mapHeightInput.value = graphHeight = nHeight;
+            changeMapSize();
+            applyLoadedData(data);
+            $(this).dialog("close");
           }
-        });
-      } else {
-        applyLoadedData(data);
-      }
-    };
-    fileReader.readAsText(fileToLoad, "UTF-8");
-  });
+        }
+      });
+    } else {
+      applyLoadedData(data);
+    }
+  }
 
   function applyLoadedData(data) {
     // redefine variables
@@ -3790,11 +4270,13 @@ function fantasyMap() {
 
     // restore events
     svg.call(zoom);
-    viewbox.on("touchmove mousemove", moved).on("click", clicked);
+    restoreDefaultEvents();
+    viewbox.on("touchmove mousemove", moved);
     overlay.selectAll("*").call(d3.drag().on("start", elementDrag));
     labels.selectAll("text").on("click", editLabel);
     burgs.selectAll("circle").call(d3.drag().on("start", elementDrag));
     rivers.selectAll("path").on("click", editRiver);
+    routes.selectAll("path").on("click", editRoute);
     svg.select("#scaleBar").call(d3.drag().on("start", elementDrag)).on("click", editScale);
     ruler.selectAll("g").call(d3.drag().on("start", elementDrag));
     ruler.selectAll("g").selectAll("text").on("click", removeParent);
@@ -3834,7 +4316,7 @@ function fantasyMap() {
       var el = d3.select(this);
       var font = el.attr("data-font");
       if (fonts.indexOf(font) === -1) {addFonts("https://fonts.googleapis.com/css?family=" + font);}
-      el.attr("data-size", +el.attr("font-size"));
+      if (!el.attr("data-size")) {el.attr("data-size", +el.attr("font-size"));}
       if (el.style("display") === "none") {el.node().style.display = null;}
     });
 
@@ -3908,15 +4390,12 @@ function fantasyMap() {
   d3.select("body").on("keydown", function() {
     $("input").on("keydown", function(e) {e.stopPropagation();}); // cancel on input
     switch(d3.event.keyCode) {
-      case 16: // Shift - hold to continue adding elements on click
-        shift = true;
-        break;
       case 113: // "F2" for new map
         $("#randomMap").click();
         break;
       case 32: // Space to log focused cell data
         var point = d3.mouse(this);
-        var index = diagram.find(point[0], point[1]).index;
+        const index = diagram.find(point[0], point[1]).index;
         console.table(cells[index]);
         break;
       case 67: // "C" to log cells data
@@ -3928,66 +4407,30 @@ function fantasyMap() {
       case 83: // "S" to log states data
         console.table(states);
         break;
-      case 27: // Escape (do nothing)
-        break;
       case 37: // Left to scroll map left
-        if (viewX + 10 <= 0) {
-          viewX += 10;
-          zoomUpdate();
-        }
+        zoom.translateBy(svg, 10, 0);
         break;
       case 39: // Right to scroll map right
-        if (viewX - 10 >= (mapWidth * (scale-1) * -1)) {
-          viewX -= 10;
-          zoomUpdate();
-        }
+        zoom.translateBy(svg, -10, 0);
         break;
       case 38: // Up to scroll map up
-        if (viewY + 10 <= 0) {
-          viewY += 10;
-          zoomUpdate();
-        }
+        zoom.translateBy(svg, 0, 10);
         break;
       case 40: // Down to scroll map down
-        if (viewY - 10 >= (mapHeight * (scale-1) * -1)) {
-          viewY -= 10;
-          zoomUpdate();
-        }
+        zoom.translateBy(svg, 0, -10);
         break;
       case 107: // Plus to zoom map up
-        if (scale < 40) {
-          var dx = mapWidth / 2 * (scale-1) + viewX;
-          var dy = mapHeight / 2 * (scale-1) + viewY;
-          viewX = dx - mapWidth / 2 * scale;
-          viewY = dy - mapHeight / 2 * scale;
-          scale += 1;
-          if (scale > 40) {scale = 40;}
-          zoomUpdate();
-          invokeActiveZooming();
-        }
+        zoom.scaleBy(svg, 1.2);
+        invokeActiveZooming();
         break;
       case 109: // Minus to zoom map out
-        if (scale > 1) {
-          var dx = mapWidth / 2 * (scale-1) + viewX;
-          var dy = mapHeight / 2 * (scale-1) + viewY;
-          viewX += mapWidth / 2 - dx;
-          viewY += mapHeight / 2 - dy;
-          scale -= 1;
-          if (scale < 1) {
-            scale = 1;
-            viewX = 0;
-            viewY = 0;
-          }
-          zoomUpdate();
-          invokeActiveZooming();
-        }
+        zoom.scaleBy(svg, 0.8);
+        invokeActiveZooming();
         break;
       case 9: // Tab to toggle full-screen mode
-        $("#mapScreenSize").click();
+        $("#updateFullscreen").click();
         break;
       }
-  }).on("keyup", function() {
-    if (d3.event.keyCode == 16) {shift = false;}
   });
 
   // Toggle Options pane
@@ -4074,10 +4517,20 @@ function fantasyMap() {
     if (id === "countriesManually") {
       customization = 2;
       mockRegions();
-      regions.append("g").attr("id", "temp");
+      let temp = regions.append("g").attr("id", "temp");
       $("#countriesBottom").children().hide();
       $("#countriesManuallyButtons").show();
-      viewbox.style("cursor", "crosshair").call(drag);
+      // highlight capital cells as it's not allowed to change capital's state that way
+      states.map(function(s) {
+        if (s.color === "neutral") {return;}
+        const capital = s.capital;
+        const index = manors[capital].cell;
+        temp.append("path")
+          .attr("data-cell", index).attr("data-state", s.i)
+          .attr("d", "M" + polygons[index].join("L") + "Z")
+          .attr("fill", s.color).attr("stroke", "red").attr("stroke-width", .7);
+      });
+      viewbox.style("cursor", "crosshair").call(drag).on("click", changeSelectedStateOnClick);
     }
     if (id === "countriesRegenerate") {
       customization = 3;
@@ -4089,23 +4542,22 @@ function fantasyMap() {
       $("div[data-sortby='expansion'], div[data-sortby='cells']").toggleClass("hidden");
     }
     if (id === "countriesManuallyComplete") {
+      icons.selectAll(".circle").remove();
       var changedCells = regions.select("#temp").selectAll("path");
       var changedStates = [];
       changedCells.each(function() {
         var el = d3.select(this);
         var cell = +el.attr("data-cell");
         var stateOld = cells[cell].region;
-        var stateNew = el.attr("data-state");
-        if (stateNew !== "neutral") {stateNew = +stateNew;}
-        cells[cell].region = stateNew;
-        if (cells[cell].manor !== undefined) {manors[cells[cell].manor].region = stateNew;}
+        if (stateOld === "neutral") {stateOld = states.length - 1;}
+        var stateNew = +el.attr("data-state");
+        const region = states[stateNew].color === "neutral" ? "neutral" : stateNew;
+        cells[cell].region = region;
+        if (cells[cell].manor !== undefined) {manors[cells[cell].manor].region = region;}
         changedStates.push(stateNew, stateOld);
       });
       changedStates = [...new Set(changedStates)];
-      changedStates.map(function(s) {
-        if (s === "neutral") {s = states.length - 1;}
-        recalculateStateData(s);
-      });
+      changedStates.map(function(s) {recalculateStateData(s);});
       var last = states.length - 1;
       if (states[last].capital === "neutral" && states[last].cells === 0) {
         $("#state" + last).remove();
@@ -4116,6 +4568,7 @@ function fantasyMap() {
     }
     if (id === "countriesManuallyCancel") {
       redrawRegions();
+      icons.selectAll(".circle").remove();
       if (grid.style("display") === "inline") {toggleGrid.click();}
       if (labels.style("display") === "none") {toggleLabels.click();}
       $("#countriesBottom").children().show();
@@ -4124,7 +4577,7 @@ function fantasyMap() {
       $("div[data-sortby='expansion'], .statePower, .icon-resize-full").addClass("hidden");
       $("div[data-sortby='cells'], .stateCells, .icon-check-empty").removeClass("hidden");
       customization = 0;
-      restoreDefaultDrag();
+      restoreDefaultEvents();
     }
     if (id === "countriesApply") {$("#countriesManuallyCancel").click();}
     if (id === "countriesRandomize") {
@@ -4290,6 +4743,7 @@ function fantasyMap() {
     }
     if (id === "burgAdd") {
       var state = +$("#burgsEditor").attr("data-state");
+      clickToAdd(); // to load on click event function
       $("#addBurg").click().attr("data-state", state);
     }
     if (id === "toggleScaleBar") {$("#scaleBar").toggleClass("hidden");}
@@ -4303,22 +4757,22 @@ function fantasyMap() {
       var rulerNew = ruler.append("g").attr("class", "linear").call(d3.drag().on("start", elementDrag));
       var factor = rn(1 / Math.pow(scale, 0.3), 1);
       rulerNew.append("title").text(title);
-      var y = Math.floor(Math.random() * mapHeight * 0.5 + mapHeight * 0.25);
-      var x1 = mapWidth * 0.2, x2 = mapWidth * 0.8;
+      var y = Math.floor(Math.random() * svgHeight * 0.5 + svgHeight * 0.25);
+      var x1 = svgWidth * 0.2, x2 = svgWidth * 0.8;
       var dash = rn(30 / distanceScale.value, 2);
       rulerNew.append("line").attr("x1", x1).attr("y1", y).attr("x2", x2).attr("y2", y).attr("class", "white").attr("stroke-width", factor);
       rulerNew.append("line").attr("x1", x1).attr("y1", y).attr("x2", x2).attr("y2", y).attr("class", "gray").attr("stroke-width", factor).attr("stroke-dasharray", dash);
       rulerNew.append("circle").attr("r", 2 * factor).attr("stroke-width", 0.5 * factor).attr("cx", x1).attr("cy", y).attr("data-edge", "left").call(d3.drag().on("drag", rulerEdgeDrag));
       rulerNew.append("circle").attr("r", 2 * factor).attr("stroke-width", 0.5 * factor).attr("cx", x2).attr("cy", y).attr("data-edge", "rigth").call(d3.drag().on("drag", rulerEdgeDrag));
-      rulerNew.append("circle").attr("r", 1.2 * factor).attr("stroke-width", 0.3 * factor).attr("cx", mapWidth / 2).attr("cy", y).attr("class", "center").call(d3.drag().on("start", rulerCenterDrag));
+      rulerNew.append("circle").attr("r", 1.2 * factor).attr("stroke-width", 0.3 * factor).attr("cx", svgWidth / 2).attr("cy", y).attr("class", "center").call(d3.drag().on("start", rulerCenterDrag));
       var dist = rn(x2 - x1);
       var label = rn(dist * distanceScale.value) + " " + distanceUnit.value;
-      rulerNew.append("text").attr("x", mapWidth / 2).attr("y", y).attr("dy", -1).attr("data-dist", dist).text(label).text(label).on("click", removeParent).attr("font-size", 10 * factor);
+      rulerNew.append("text").attr("x", svgWidth / 2).attr("y", y).attr("dy", -1).attr("data-dist", dist).text(label).text(label).on("click", removeParent).attr("font-size", 10 * factor);
       return;
     }
     if (id === "addOpisometer" || id === "addPlanimeter") {
       if ($(this).hasClass("pressed")) {
-        restoreDefaultDrag();
+        restoreDefaultEvents();
         $(this).removeClass("pressed");
       } else {
         $(this).addClass("pressed");
@@ -4347,14 +4801,14 @@ function fantasyMap() {
         buttons: {
           Cancel: function() {$(this).dialog("close");},
           Clear: function() {
-            closeAllDialogs();
+            closeDialogs();
             undraw();
             placePoints();
             calculateVoronoi(points);
             detectNeighbors("grid");
             drawScaleBar();
             customizeHeightmap();
-            $("#paintBrushes").click();
+            openBrushesPanel();
             $(this).dialog("close");
           }
         }
@@ -4382,15 +4836,7 @@ function fantasyMap() {
     }
     // heightmap customization buttons
     if (customization === 1) {
-      if (id === "paintBrushes") {
-        if ($("#brushesPanel").is(":visible")) {return;}
-        viewbox.style("cursor", "crosshair").call(drag);
-        $("#brushesPanel").dialog({
-          title: "Paint Brushes",
-          minHeight: 40, width: "auto", maxWidth: 200, resizable: false,
-          position: {my: "right top", at: "right-10 top+10", of: "svg"}})
-        .on('dialogclose', restoreDefaultDrag);
-      }
+      if (id === "paintBrushes") {openBrushesPanel();}
       if (id === "rescaleExecute") {
         var subject = rescaleLower.value + "-" + rescaleHigher.value;
         var sign = conditionSign.value;
@@ -4400,16 +4846,25 @@ function fantasyMap() {
         if (sign === "+") {modifyHeights(subject, +modifier, 1);}
         if (sign === "-") {modifyHeights(subject, (-1 * modifier), 1);}
         if (sign === "^") {modifyHeights(subject, 0, "^" + modifier);}
-        mockHeightmap();
+        updateHeightmap();
+        updateHistory();
       }
       if (id === "rescaleButton") {
         $("#modifyButtons").children().not("#rescaleButton, .condition").toggle();
       }
       if (id === "rescaleCondButton") {$("#modifyButtons").children().not("#rescaleCondButton, #rescaler").toggle();}
-      if (id === "undo") {restoreHistory(historyStage - 1);}
-      if (id === "redo") {restoreHistory(historyStage + 1);}
-      if (id === "smoothHeights") {smoothHeights(4); mockHeightmap();}
-      if (id === "disruptHeights") {disruptHeights(); mockHeightmap();}
+      if (id === "undo" || id === "templateUndo") {restoreHistory(historyStage - 1);}
+      if (id === "redo" || id === "templateRedo") {restoreHistory(historyStage + 1);}
+      if (id === "smoothHeights") {
+        smoothHeights(4);
+        updateHeightmap();
+        updateHistory();
+      }
+      if (id === "disruptHeights") {
+        disruptHeights();
+        updateHeightmap();
+        updateHistory();
+      }
       if (id === "getMap") {
         if (states.length && manors.length) {getMap("keep");} else {getMap();}
       }
@@ -4474,28 +4929,6 @@ function fantasyMap() {
         return;
       }
     }
-    if ($(this).hasClass('radio') && (parent === "addFeature" || parent === "brushesButtons")) {
-      if ($(this).hasClass('pressed')) {
-        $(this).removeClass('pressed');
-        restoreDefaultDrag();
-        $("#brushRadiusLabel, #brushRadius").attr("disabled", true).addClass("disabled");
-        $("#burgAdd").removeClass('pressed');
-      } else {
-        $(".pressed").removeClass('pressed');
-        $(this).attr("data-state", -1).addClass('pressed');
-        if (id === "addBurg") {$("#burgAdd").addClass('pressed');}
-        viewbox.style("cursor", "crosshair");
-        if (id.slice(0,5) === "brush" && id !== "brushRange" && id !== "brushTrough") {
-          viewbox.call(drag);
-        }
-        if (parent === "addFeature" || $(this).hasClass("feature")) {
-          $("#brushRadiusLabel, #brushRadius").attr("disabled", true).addClass("disabled");
-        } else {
-          $("#brushRadiusLabel, #brushRadius").attr("disabled", false).removeClass("disabled");
-        }
-      }
-      return;
-    }
     if (id === "restoreStyle") {
       alertMessage.innerHTML = "Are you sure you want to restore default style?";
       $("#alert").dialog({resizable: false, title: "Restore style",
@@ -4510,7 +4943,7 @@ function fantasyMap() {
         }
       });
     }
-    if ($(this).hasClass('radio') && parent === "mapFilters") {
+    if (parent === "mapFilters") {
       $("svg").attr("filter", "");
       if ($(this).hasClass('pressed')) {
         $("#mapFilters .pressed").removeClass('pressed');
@@ -4521,20 +4954,9 @@ function fantasyMap() {
       }
       return;
     }
-    if (id === "mapScreenSize") {
-      if ($("body").hasClass("fullscreen")) {
-        mapWidthInput.value = 960; // default width
-        mapHeightInput.value = 540; // default height
-        localStorage.setItem("screenSize", [960, 540]);
-        $(".fullscreen").removeClass("fullscreen");
-        $(this).addClass("icon-resize-full-alt").removeClass("icon-resize-small");
-      } else {
-        localStorage.removeItem("screenSize");
-        mapWidthInput.value = window.innerWidth;
-        mapHeightInput.value = window.innerHeight;
-        $("body, svg").addClass("fullscreen");
-        $(this).removeClass("icon-resize-full-alt").addClass("icon-resize-small");
-      }
+    if (id === "updateFullscreen") {
+      mapWidthInput.value = window.innerWidth;
+      mapHeightInput.value = window.innerHeight;
       changeMapSize();
     }
     if (id === "saveButton") {$("#saveDropdown").slideToggle();}
@@ -4543,13 +4965,11 @@ function fantasyMap() {
     if (id === "zoomPlus") {
       scale += 1;
       if (scale > 40) {scale = 40;}
-      zoomUpdate();
       invokeActiveZooming();
     }
     if (id === "zoomMinus") {
       scale -= 1;
       if (scale <= 1) {scale = 1; viewX = 0; viewY = 0;}
-      zoomUpdate();
       invokeActiveZooming();
     }
     if (id === "styleFontPlus" || id === "styleFontMinus") {
@@ -4561,6 +4981,7 @@ function fantasyMap() {
         if (size < 2) {size = 2;}
         el.attr("data-size", size).attr("font-size", rn((size + (size / scale)) / 2, 2));
       });
+      invokeActiveZooming();
       return;
     }
     if (id === "styleFillPlus" || id === "styleFillMinus") {
@@ -4585,7 +5006,7 @@ function fantasyMap() {
       });
       return;
     }
-    if (id === "templateClear" || id === "brushClear") {
+    if (id === "brushClear") {
       if (customization === 1) {
         var message = "Are you sure you want to clear the map?";
         alertMessage.innerHTML = message;
@@ -4599,9 +5020,10 @@ function fantasyMap() {
               cells.map(function(i) {i.height = 0;});
               // clear history
               history = [];
-              historyStage = -1;
-              redo.disabled = true;
-              undo.disabled = true;
+              historyStage = 0;
+              updateHistory();
+              redo.disabled = templateRedo.disabled = true;
+              undo.disabled = templateUndo.disabled =  true;
             },
             Cancel: function() {$(this).dialog("close");}
           }
@@ -4660,7 +5082,7 @@ function fantasyMap() {
   });
 
   function editHeightmap(type) {
-    closeAllDialogs();
+    closeDialogs();
     var heights = [], regionData = [], cultureData = [];
     for (var i = 0; i < points.length; i++) {
       var cell = diagram.find(points[i][0], points[i][1]).index;
@@ -4689,13 +5111,46 @@ function fantasyMap() {
     }
     mockHeightmap();
     customizeHeightmap();
-    $("#paintBrushes").click();
+    openBrushesPanel();
+  }
+
+  function openBrushesPanel() {
+    if ($("#brushesPanel").is(":visible")) {return;}
+    $("#brushesPanel").dialog({
+      title: "Paint Brushes",
+      minHeight: 40, width: "auto", maxWidth: 200, resizable: false,
+      position: {my: "right top", at: "right-10 top+10", of: "svg"}
+    }).on('dialogclose', function() {
+      restoreDefaultEvents();
+      $("#brushesButtons > .pressed").removeClass('pressed');
+    });
+
+    if (modules.openBrushesPanel) {return;}
+    modules.openBrushesPanel = true;
+
+    $("#brushesButtons > button").on("click", function() {
+      const rSlider = $("#brushRadiusLabel, #brushRadius");
+      if ($(this).hasClass('pressed')) {
+        $(this).removeClass('pressed');
+        restoreDefaultEvents();
+        icons.selectAll(".circle").remove();
+        rSlider.attr("disabled", true).addClass("disabled");
+      } else {
+        $("#brushesButtons > .pressed").removeClass('pressed');
+        $(this).addClass('pressed');
+        viewbox.style("cursor", "crosshair");
+        if (this.id !== "brushRange" && this.id !== "brushTrough") {viewbox.call(drag);} // on drag brushes
+        else {viewbox.on("click", placeLinearFeature);} // on click brushes
+        if ($(this).hasClass("feature")) {rSlider.attr("disabled", true).addClass("disabled");}
+        else {rSlider.attr("disabled", false).removeClass("disabled");}
+      }
+    });
   }
 
   function drawPerspective() {
     console.time("drawPerspective");
     const width = 320, height = 180;
-    const wRatio = mapWidth / width, hRatio = mapHeight / height;
+    const wRatio = graphWidth / width, hRatio = graphHeight / height;
     const lineCount = +$("#lineHandle0").attr("data-value");
     const lineGranularity = +$("#lineHandle1").attr("data-value");
     const perspective = document.getElementById("perspective");
@@ -4938,7 +5393,7 @@ function fantasyMap() {
       if (type === "Multiply") {modifyHeights(dist, 0, count);}
       if (type === "Smooth") {smoothHeights(count);}
     }
-    if (steps) {mockHeightmap();}
+    if (steps) {mockHeightmap(); updateHistory();}
   });
 
   // Save custom template as text file
@@ -4987,11 +5442,11 @@ function fantasyMap() {
 
   // Image to Heightmap Converter dialog
   function convertImage() {
-    canvas.width = mapWidth;
-    canvas.height = mapHeight;
+    canvas.width = svgWidth;
+    canvas.height = svgHeight;
     // turn off paint brushes drag and cursor
     $(".pressed").removeClass('pressed');
-    restoreDefaultDrag();
+    restoreDefaultEvents();
     var div = d3.select("#colorScheme");
     if (div.selectAll("*").size() === 0) {
       for (var i = 0; i <= 100; i++) {
@@ -5016,7 +5471,7 @@ function fantasyMap() {
   $("#imageToLoad").change(function() {
     console.time("loadImage");
     // set style
-    viewbox.attr("transform", null);
+    resetZoom();
     grid.attr("stroke-width", .3);
     // load image
     var file = this.files[0];
@@ -5025,7 +5480,7 @@ function fantasyMap() {
     var img = new Image;
     // draw image
     img.onload = function() {
-      ctx.drawImage(img, 0, 0, mapWidth, mapHeight);
+      ctx.drawImage(img, 0, 0, svgWidth, svgHeight);
       heightsFromImage(+convertColors.value);
       console.timeEnd("loadImage");
     }
@@ -5034,7 +5489,7 @@ function fantasyMap() {
   });
 
   function heightsFromImage(count) {
-    var imageData = ctx.getImageData(0, 0, mapWidth, mapHeight);
+    var imageData = ctx.getImageData(0, 0, svgWidth, svgHeight);
     var data = imageData.data;
     $("#landmass > path, .color-div").remove();
     $("#landmass, #colorsUnassigned").fadeIn();
@@ -5042,9 +5497,9 @@ function fantasyMap() {
     var colors = [], palette = [];
     points.map(function(i) {
       var x = rn(i[0]), y = rn(i[1]);
-      if (y == mapHeight) {y--;}
-      if (x == mapWidth) {x--;}
-      var p = (x + y * mapWidth) * 4;
+      if (y == svgHeight) {y--;}
+      if (x == svgWidth) {x--;}
+      var p = (x + y * svgWidth) * 4;
       var r = data[p], g = data[p + 1], b = data[p + 2];
       colors.push([r, g, b]);
     });
@@ -5139,7 +5594,7 @@ function fantasyMap() {
 
   // auto assign color based on luminosity or hue
   function autoAssing(type) {
-    var imageData = ctx.getImageData(0, 0, mapWidth, mapHeight);
+    var imageData = ctx.getImageData(0, 0, svgWidth, svgHeight);
     var data = imageData.data;
     $("#landmass > path, .color-div").remove();
     $("#colorsAssigned").fadeIn();
@@ -5147,9 +5602,9 @@ function fantasyMap() {
     var heights = [];
     polygons.map(function(i, d) {
       var x = rn(i.data[0]), y = rn(i.data[1]);
-      if (y == mapHeight) {y--;}
-      if (x == mapWidth) {x--;}
-      var p = (x + y * mapWidth) * 4;
+      if (y == svgHeight) {y--;}
+      if (x == svgWidth) {x--;}
+      var p = (x + y * svgWidth) * 4;
       var r = data[p], g = data[p + 1], b = data[p + 2];
       var lab = d3.lab("rgb(" + r + ", " + g + ", " + b + ")");
       if (type === "hue") {
@@ -5182,6 +5637,7 @@ function fantasyMap() {
 
   function completeConvertion() {
     mockHeightmap();
+    restartHistory();
     $(".color-div").remove();
     $("#colorsAssigned, #colorsUnassigned").fadeOut();
     grid.attr("stroke-width", .1);
@@ -5195,20 +5651,17 @@ function fantasyMap() {
   function undraw() {
     svg.selectAll("path, circle, line, text, #ruler > g").remove();
     cells = [], land = [], riversData = [], manors = [], states = [], queue = [];
-    history = [], historyStage = -1; redo.disabled = true; undo.disabled = true; // clear history
   }
 
   // Enter Heightmap Customization mode
   function customizeHeightmap() {
     customization = 1;
-    svg.transition().duration(1000).call(zoom.transform, d3.zoomIdentity);
+    resetZoom();
     $("#customizationMenu").slideDown();
-    viewbox.style("cursor", "crosshair").call(drag);
     landmassCounter.innerHTML = "0";
     $('#grid').fadeIn();
     $('#toggleGrid').removeClass("buttonoff");
-    if ($("#labelEditor").is(":visible")) {$("#labelEditor").dialog('close');}
-    if ($("#riverEditor").is(":visible")) {$("#riverEditor").dialog('close');}
+    restartHistory();
   }
 
   // Remove all customization related styles, reset values
@@ -5220,11 +5673,11 @@ function fantasyMap() {
     $("#landmass").empty();
     $('#grid').empty().fadeOut();
     $('#toggleGrid').addClass("buttonoff");
-    restoreDefaultDrag();
+    restoreDefaultEvents();
     if (!$("#toggleHeight").hasClass("buttonoff")) {toggleHeight();}
-    closeAllDialogs();
+    closeDialogs();
     history = [];
-    historyStage = -1;
+    historyStage = 0;
   }
 
   // open editCountries dialog
@@ -5237,8 +5690,8 @@ function fantasyMap() {
     for (var s = 0; s < states.length; s++) {
       $("#countriesBody").append('<div class="states" id="state' + s + '"></div>');
       var el = $("#countriesBody div:last-child");
-      var burgs = states[s].burgs;
-      totalBurgs += burgs;
+      var burgsCount = states[s].burgs;
+      totalBurgs += burgsCount;
       // calculate user-friendly area and population
       var area = rn(states[s].area * Math.pow(distanceScale.value, 2));
       totalArea += area;
@@ -5274,7 +5727,7 @@ function fantasyMap() {
       el.append('<span title="Cells count" class="icon-check-empty"></span>');
       el.append('<div title="Cells count" class="stateCells">' + states[s].cells + '</div>');
       el.append('<span title="Burgs count. Click to show a full list" style="padding-right: 1px" class="stateBIcon icon-dot-circled"></span>');
-      el.append('<div title="Burgs count. Click to show a full list" class="stateBurgs">' + burgs + '</div>');
+      el.append('<div title="Burgs count. Click to show a full list" class="stateBurgs">' + burgsCount + '</div>');
       el.append('<span title="Area: ' + (area + unit) + '" style="padding-right: 4px" class="icon-map-o"></span>');
       el.append('<div title="Area: ' + (area + unit) + '" class="stateArea">' + areaConv + '</div>');
       el.append('<span title="' + title + '" class="icon-male"></span>');
@@ -5292,7 +5745,7 @@ function fantasyMap() {
     if (!$("#countriesEditor").is(":visible")) {
       $("#countriesEditor").dialog({
         title: "Countries Editor",
-        minHeight: "auto", width: "auto",
+        minHeight: "auto", minWidth: Math.min(svgWidth, 390),
         position: {my: "right top", at: "right-10 top+10", of: "svg"}
       }).on("dialogclose", function() {
         if (customization === 2 || customization === 3) {$("#countriesManuallyCancel").click()};
@@ -5353,14 +5806,101 @@ function fantasyMap() {
       }
     }).hover(focusCapital, unfocus);
     $(".stateBurgs, .stateBIcon").on("click", editBurgs).hover(focusBurgs, unfocus);
+
     $("#countriesBody > .states").on("click", function() {
-      if ($(event.target).hasClass("selectCapital")) {
-        $(event.target).toggleClass("pressed");
-      } else if (customization === 2) {
+      if (customization === 2) {
         $(".selected").removeClass("selected");
         $(this).addClass("selected");
+        const state = +$(this).attr("id").slice(5);
+        let color = states[state].color;
+        if (color === "neutral") {color = "white";}
+        if (icons.selectAll(".circle").size()) {icons.selectAll(".circle").attr("stroke", color);}
       }
     });
+
+    $(".selectCapital").on("click", function() {
+      if ($(this).hasClass("pressed")) {
+        $(this).removeClass("pressed");
+        restoreDefaultEvents();
+      } else {
+        $(this).addClass("pressed");
+        viewbox.style("cursor", "crosshair").on("click", selectCapital);
+      }
+    });
+
+    function selectCapital() {
+      var point = d3.mouse(this);
+      var index = getIndex(point);
+      var x = rn(point[0], 2), y = rn(point[1], 2);
+
+      if (cells[index].height < 0.2) {
+        console.error("Cannot place capital on the water! Select a land cell");
+        return;
+      }
+      // check for capitals group for labels
+      let group = labels.select("#capitals");
+      if (!group.size()) {
+        group = labels.append("g").attr("id", "capitals")
+          .attr("fill", "#3e3e4b").attr("opacity", 1)
+          .attr("font-family", "Almendra SC").attr("data-font", "Almendra+SC")
+          .attr("font-size", 7).attr("data-size", 7);
+        invokeActiveZooming();
+      }
+
+      var state = $(".selectCapital.pressed").attr("id").replace("selectCapital", "");
+      var oldState = cells[index].region;
+      if (oldState === "neutral") {oldState = states.length - 1;}
+      if (cells[index].manor !== undefined) {
+        // cell has burg
+        var burg = cells[index].manor;
+        if (states[oldState].capital === burg) {
+          console.error("Existing capital cannot be selected as a new state capital! Select other cell");
+          return;
+        } else {
+          // make this burg a new capital
+          var urbanFactor = 0.9; // for old neutrals
+          manors[burg].region = state;
+          if (oldState === "neutral") {manors[burg].population *= (1 / urbanFactor);}
+          manors[burg].population *= 2; // give capital x2 population bonus
+          states[state].capital = burg;
+          $("#manorLabel"+burg).detach().appendTo($("#capitals")).attr("dy", -1.3);
+          $("#manorIcon"+burg).attr("r", 1).attr("stroke-width", .24);
+        }
+      } else {
+        // free cell -> create new burg for a capital
+        var closest = cultureTree.find(x, y);
+        var culture = cultureTree.data().indexOf(closest) || 0;
+        var name = generateName(culture);
+        var i = manors.length;
+        cells[index].manor = i;
+        states[state].capital = i;
+        var score = cells[index].score;
+        if (score <= 0) {score = rn(Math.random(), 2);}
+        if (cells[index].crossroad) {score += cells[index].crossroad;} // crossroads
+        if (cells[index].confluence) {score += Math.pow(cells[index].confluence, 0.3);} // confluences
+        if (cells[index].port) {score *= 3;} // port-capital
+        var population = rn(score, 1);
+        manors.push({i, cell:index, x, y, region: state, culture, name, population});
+        burgs.append("circle").attr("id", "manorIcon"+i)
+          .attr("r", 1).attr("stroke-width", .24).attr("cx", x)
+          .attr("cy", y).call(d3.drag().on("start", elementDrag));
+        group.append("text").attr("id", "manorLabel"+i)
+          .attr("x", x).attr("y", y).attr("dy", -1.3)
+          .text(name).on("click", editLabel);
+      }
+      cells[index].region = state;
+      cells[index].neighbors.map(function(n) {
+        if (cells[n].height < 0.2) {return;}
+        if (cells[n].manor !== undefined) {return;}
+        cells[n].region = state;
+      });
+      redrawRegions();
+      recalculateStateData(oldState); // re-calc old state data
+      recalculateStateData(state); // calc new state data
+      editCountries();
+      restoreDefaultEvents();
+    }
+
     $(".statePower").on("input", function() {
       var s = +(this.parentNode.id).slice(5);
       states[s].power = +this.value;
@@ -5395,42 +5935,51 @@ function fantasyMap() {
     });
     // fully remove country
     $("#countriesBody .icon-trash-empty").on("click", function() {
-      alertMessage.innerHTML = `Are you sure you want to remove the country?`;
       var s = +(this.parentNode.id).slice(5);
-      var capital = states[s].capital;
-      if (capital === "select" && s === states.length - 1) {
-        editCountries();
+      if (states[s].capital === "select") {
+        removeCountry(s);
         return;
       }
+      alertMessage.innerHTML = `Are you sure you want to remove the country?`;
       $("#alert").dialog({resizable: false, title: "Remove country", buttons: {
         Remove: function() {
-          states.splice(s, 1);
-          states.map(function(s, i) {s.i = i;});
-          $("#manorLabel"+capital).detach().appendTo($("#towns")).attr("dy", -0.7); // change capital label to burg
-          $("#manorIcon"+capital).attr("r", .5).attr("stroke-width", .12);
-          var burgs = $.grep(manors, function(e) {return (e.region === s);});
-          var urbanFactor = 0.9;
-          burgs.map(function(b) {
-            if (b.i === capital) {b.population *= 0.5;}
-            b.population *= urbanFactor;
-            b.region = "neutral";
-          });
-          cells.map(function(c) {
-            if (c.region === s) {c.region = "neutral";}
-            else if (c.region > s) {c.region -= 1;}
-          });
-          // re-calculate neutral data
-          if (states[states.length-1].capital !== "neutral") {
-            states.push({i: states.length, color: "neutral", name: "Neutrals", capital: "neutral"});
-          }
+          removeCountry(s);
           $(this).dialog("close");
-          redrawRegions();
-          recalculateStateData(states.length - 1); // re-calc data for neutrals
-          editCountries();
         },
         Cancel: function() {$(this).dialog("close");}
       }});
     });
+
+    function removeCountry(s) {
+      const cellsCount = states[s].cells;
+      const capital = states[s].capital;
+      states.splice(s, 1);
+      states.map(function(s, i) {s.i = i;});
+      cells.map(function(c) {
+        if (c.region === s) {c.region = "neutral";}
+        else if (c.region > s) {c.region -= 1;}
+      });
+      // do only if removed state had cells
+      if (cellsCount) {
+        $("#manorLabel"+capital).detach().appendTo($("#towns")).attr("dy", -0.7); // change capital label to burg
+        $("#manorIcon"+capital).attr("r", .5).attr("stroke-width", .12);
+        var burgsSelection = $.grep(manors, function(e) {return (e.region === s);});
+        var urbanFactor = 0.9;
+        burgsSelection.map(function(b) {
+          if (b.i === capital) {b.population *= 0.5;}
+          b.population *= urbanFactor;
+          b.region = "neutral";
+        });
+        // re-calculate neutral data
+        if (states[states.length-1].capital !== "neutral") {
+          states.push({i: states.length, color: "neutral", name: "Neutrals", capital: "neutral"});
+        }
+        recalculateStateData(states.length - 1); // re-calc data for neutrals
+        redrawRegions();
+      }
+      editCountries();
+    }
+
     $("#countriesNeutral").on("change", function() {regenerateCountries();});
   }
 
@@ -5621,14 +6170,14 @@ function fantasyMap() {
 
   function unfocus() {$(".drag").removeClass("drag");}
 
-  // save dialog position if dialog window is dragged
-  $(".dialog").on("dialogdragstop", function(event, ui) {
-    localStorage.setItem(this.id, [ui.offset.left, ui.offset.top]);
+  // save dialog position if "stable" dialog window is dragged
+  $(".stable").on("dialogdragstop", function(event, ui) {
+    sessionStorage.setItem(this.id, [ui.offset.left, ui.offset.top]);
   });
 
-  // restore saved dialog position on dialog window open
-  $(".dialog").on("dialogopen", function(event, ui) {
-    var pos = localStorage.getItem(this.id);
+  // restore saved dialog position on "stable" dialog window open
+  $(".stable").on("dialogopen", function(event, ui) {
+    var pos = sessionStorage.getItem(this.id);
     if (!pos) {return;}
     pos = pos.split(",");
     if (pos[0] > $(window).width() - 100 || pos[1] > $(window).width()  - 40) {return;} // prevent showing out of screen
@@ -5862,69 +6411,57 @@ function fantasyMap() {
     fileReader.readAsText(fileToLoad, "UTF-8");
   });
 
-  // just apply map size that was already set
+  // just apply map size that was already set, apply graph size!
   function applyMapSize() {
-    mapWidth = +mapWidthInput.value;
-    mapHeight = +mapHeightInput.value;
-    voronoi = d3.voronoi().extent([[0, 0], [mapWidth, mapHeight]]);
-    svg.attr("width", mapWidth).attr("height", mapHeight);
-    zoom.translateExtent([[0, 0], [mapWidth, mapHeight]]);
+    svgWidth = graphWidth = +mapWidthInput.value;
+    svgHeight = graphHeight = +mapHeightInput.value;
+    svg.attr("width", svgWidth).attr("height", svgHeight);
+    voronoi = d3.voronoi().extent([[0, 0], [graphWidth, graphHeight]]);
+    initView = [1, 0, 0];
+    zoom.translateExtent([[0, 0], [graphWidth, graphHeight]]).scaleExtent([1, 20]).scaleTo(svg, 1);
+    viewbox.attr("transform", null);
+    ocean.selectAll("rect").attr("x", 0).attr("y", 0).attr("width", "100%").attr("height", "100%");
   }
 
-  // change map size on manual size change or window resize
+  // change svg size on manual size change or window resize, do not change graph size
   function changeMapSize() {
-    mapWidth = +mapWidthInput.value;
-    mapHeight = +mapHeightInput.value;
-    svg.attr("width", mapWidth).attr("height", mapHeight);
-    voronoi = d3.voronoi().extent([[0, 0], [mapWidth, mapHeight]]);
-    zoom.translateExtent([[0, 0], [mapWidth, mapHeight]]);
-    oceanPattern.select("rect").attr("width", mapWidth).attr("height", mapHeight);
-    oceanLayers.select("rect").attr("width", mapWidth).attr("height", mapHeight);
-    scX = d3.scaleLinear().domain([0, mapWidth]).range([0, mapWidth]);
-    scY = d3.scaleLinear().domain([0, mapHeight]).range([0, mapHeight]);
-    lineGen = d3.line().x(function(d) {return scX(d.scX);}).y(function(d) {return scY(d.scY);});
+    svgWidth = +mapWidthInput.value;
+    svgHeight = +mapHeightInput.value;
+    svg.attr("width", svgWidth).attr("height", svgHeight);
+    zoom.translateExtent([[0, 0], [svgWidth, svgHeight]]);
     fitScaleBar();
     fitStatusBar();
   }
 
   // fit full-screen map if window is resized
-  $(window).resize(function() {
-    if ($("body").hasClass("fullscreen")) {
-      mapWidthInput.value = window.innerWidth;
-      mapHeightInput.value = window.innerHeight;
-      applyMapSize();
-      oceanPattern.select("rect").attr("width", mapWidth).attr("height", mapHeight);
-      oceanLayers.select("rect").attr("width", mapWidth).attr("height", mapHeight);
-      zoom.translateExtent([[0, 0], [mapWidth, mapHeight]]);
-      fitScaleBar();
-      fitStatusBar();
-    }
+  $(window).resize(function(e) {
+    // trick to prevent resize on download bar opening
+    if (allowResize === false) {allowResize = true; return;}
+    mapWidthInput.value = window.innerWidth;
+    mapHeightInput.value = window.innerHeight;
+    changeMapSize();
   });
 
   // fit ScaleBar to map size
   function fitScaleBar() {
     if (d3.select("#scaleBar").size()) {
       var bbox = d3.select("#scaleBar").node().getBBox();
-      var tr = [mapWidth - 10 - bbox.width, mapHeight - 10 - bbox.height];
+      var tr = [svgWidth - 10 - bbox.width, svgHeight - 10 - bbox.height];
       d3.select("#scaleBar").attr("transform", "translate(" + rn(tr[0]) + "," + rn(tr[1]) + ")");
-      localStorage.removeItem("scaleBar");
+      sessionStorage.removeItem("scaleBar");
     }
   }
 
   // fit Statusbar to map size
   function fitStatusBar() {
     var el = $("#statusbar");
-    if ($("body").hasClass("fullscreen")) {
-      el.css("top", mapHeight - 20);
-    } else {
-      el.css("top", mapHeight + 8);
-    }
+    el.css("top", svgHeight - 20);
     if (toggleStatusbar.checked) {el.show();}
   }
 
   // restore initial style
   function applyDefaultStyle() {
-    viewbox.on("touchmove mousemove", moved).on("click", clicked);
+    viewbox.on("touchmove mousemove", moved);
     landmass.attr("opacity", 1).attr("fill", "#eef6fb");
     coastline.attr("opacity", .5).attr("stroke", "#1f3846").attr("stroke-width", .7).attr("filter", "url(#dropShadow)");
     regions.attr("opacity", .55);
@@ -5939,14 +6476,16 @@ function fantasyMap() {
     searoutes.attr("opacity", .8).attr("stroke", "#ffffff").attr("stroke-width", .2).attr("stroke-dasharray", "1 2").attr("stroke-linecap", "round");
     grid.attr("opacity", 1).attr("stroke", "#808080").attr("stroke-width", .1);
     ruler.attr("opacity", 1).style("display", "none").attr("filter", "url(#dropShadow)");
-    overlay.attr("opacity", 1).attr("stroke", "#808080").attr("stroke-width", .5);
-    ocean.select("#oceanBase").attr("opacity", 1).attr("fill", "#5167a9");
+    overlay.attr("opacity", .8).attr("stroke", "#808080").attr("stroke-width", .5);
+    ocean.select("#oceanBase").attr("opacity", 1).attr("fill", "#53679f");
     labels.attr("opacity", 1);
-    size = rn(10 - capitalsCount / 20);
-    capitals.attr("fill", "#3e3e4b").attr("opacity", 1).attr("font-family", "Amatic SC").attr("data-font", "Amatic+SC:700").attr("font-size", size).attr("data-size", size);
-    towns.attr("fill", "#3e3e4b").attr("opacity", 1).attr("font-family", "Amatic SC").attr("data-font", "Amatic+SC:700").attr("font-size", 4).attr("data-size", 4);
-    size = rn(18 - capitalsCount / 6);
-    countries.attr("fill", "#3e3e4b").attr("opacity", 1).attr("font-family", "Amatic SC").attr("data-font", "Amatic+SC:700").attr("font-size", size).attr("data-size", size);
+    size = rn(8 - capitalsCount / 20);
+    if (size < 3) {size = 3;}
+    capitals.attr("fill", "#3e3e4b").attr("opacity", 1).attr("font-family", "Almendra SC").attr("data-font", "Almendra+SC").attr("font-size", size).attr("data-size", size);
+    towns.attr("fill", "#3e3e4b").attr("opacity", 1).attr("font-family", "Almendra SC").attr("data-font", "Almendra+SC").attr("font-size", 3).attr("data-size", 4);
+    size = rn(16 - capitalsCount / 6);
+    if (size < 6) {size = 6;}
+    countries.attr("fill", "#3e3e4b").attr("opacity", 1).attr("font-family", "Almendra SC").attr("data-font", "Almendra+SC").attr("font-size", size).attr("data-size", size);
   }
 
   // Options handlers
@@ -5957,6 +6496,13 @@ function fantasyMap() {
       var sel = this.value;
       var el = viewbox.select("#"+sel);
       $("#styleInputs div").hide();
+      // opacity
+      $("#styleOpacity, #styleFilter").css("display", "block");
+      var opacity = el.attr("opacity") || 1;
+      styleOpacityInput.value = styleOpacityOutput.value = opacity;
+      // filter
+      if (sel == "oceanBase") {el = oceanLayers;}
+      styleFilterInput.value = el.attr("filter") || "";
       if (sel === "rivers" || sel === "oceanBase" || sel === "lakes" || sel === "landmass" || sel === "burgs") {
         $("#styleFill").css("display", "inline-block");
         styleFillInput.value = styleFillOutput.value = el.attr("fill");
@@ -6023,13 +6569,6 @@ function fantasyMap() {
       if (sel === "overlay") {
         $("#styleOverlay").css("display", "block");
       }
-      // opacity
-      $("#styleOpacity, #styleFilter").css("display", "block");
-      var opacity = el.attr("opacity") || 1;
-      styleOpacityInput.value = styleOpacityOutput.value = opacity;
-      // filter
-      if (sel == "oceanBase") {el = oceanLayers;}
-      styleFilterInput.value = el.attr("filter") || "";
       return;
     }
     if (id === "styleFillInput") {
@@ -6075,6 +6614,7 @@ function fantasyMap() {
       if (sel == "oceanBase") {sel = "oceanLayers";}
       var el = svg.select("#"+sel);
       el.attr('filter', this.value);
+      invokeActiveZooming();
       return;
     }
     if (id === "styleSchemeInput") {
@@ -6095,14 +6635,9 @@ function fantasyMap() {
         toggleOverlay();
       }
     }
-    if (id === "activeZooming") {
-      zoomUpdate();
-      invokeActiveZooming();
-      return;
-    }
     if (id === "mapWidthInput" || id === "mapHeightInput") {
       changeMapSize();
-      localStorage.setItem("screenSize", [+mapWidthInput.value, +mapHeightInput.value]);
+      sessionStorage.setItem("screenSize", [+mapWidthInput.value, +mapHeightInput.value]);
     }
     if (id === "sizeInput") {
       graphSize = sizeOutput.value = +this.value;
@@ -6192,12 +6727,17 @@ function fantasyMap() {
       $("#scaleBar").removeClass("hidden");
       drawScaleBar();
     }
+    if (id === "barLabel") {
+      $("#scaleBar").removeClass("hidden");
+      drawScaleBar();
+    }
   });
 
   $("#rescaler").change(function() {
       var change = rn((+this.value - 5) / 10, 2);
       modifyHeights("all", change, 1);
-      mockHeightmap();
+      updateHeightmap();
+      updateHistory();
       rescaler.value = 5;
   });
 
@@ -6252,4 +6792,43 @@ function fantasyMap() {
     if (id === "customizeTab") {$("#customizeContent").show();}
     if (id === "aboutTab") {$("#aboutContent").show();}
   });
+
+  // Pull request from @evyatron
+  // https://github.com/Azgaar/Fantasy-Map-Generator/pull/49
+  function addDragToUpload() {
+    document.addEventListener('dragover', function(e) {
+        e.stopPropagation();
+        e.preventDefault();
+        $('#map-dragged').show();
+    });
+
+    document.addEventListener('dragleave', function(e) {
+        $('#map-dragged').hide();
+    });
+
+    document.addEventListener('drop', function(e) {
+      e.stopPropagation();
+      e.preventDefault();
+      $('#map-dragged').hide();
+      // no files or more than one
+      if (e.dataTransfer.items == null || e.dataTransfer.items.length != 1) {return;}
+      var file = e.dataTransfer.items[0].getAsFile();
+      // not a .map file
+      if (file.name.indexOf('.map') == -1) {
+        alertMessage.innerHTML = 'Please upload a <b>.map</b> file you have previously downloaded';
+        $("#alert").dialog({
+          resizable: false, title: "Invalid file format",
+          width: 400, buttons: {
+            Close: function() { $(this).dialog("close"); }
+          }, position: {my: "center", at: "center", of: "svg"}
+        });
+        return;
+      }
+      // all good - show uploading text and load the map
+      $("#map-dragged > p").text("Uploading<span>.</span><span>.</span><span>.</span>");
+      uploadFile(file, function onUploadFinish() {
+        $("#map-dragged > p").text("Drop to upload");
+      });
+    });
+  }
 }
