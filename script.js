@@ -1273,7 +1273,7 @@ function fantasyMap() {
       var scalePos = sessionStorage.getItem("scaleBar").split(",");
       tr = [+scalePos[0] - bbox.width, +scalePos[1] - bbox.height];
     } else {
-      tr = [svgWidth - 10 - bbox.width, svgHeight - 5 - bbox.height];
+      tr = [svgWidth - 10 - bbox.width, svgHeight - bbox.height];
     }
     scaleBar.attr("transform", "translate(" + rn(tr[0]) + "," + rn(tr[1]) + ")");
   }
@@ -4439,16 +4439,19 @@ function fantasyMap() {
       $("#regenerate").hide();
       $("#options").fadeIn();
       $("#layoutTab").click();
-      this.innerHTML = "&#x25c0;";
+      $("#optionsTrigger").removeClass("icon-right-open glow").addClass("icon-left-open");
     } else {
       $("#options").fadeOut();
-      this.innerHTML = "&#x25b6;";
+      $("#optionsTrigger").removeClass("icon-left-open").addClass("icon-right-open");
     }
   });
   $("#collapsible").hover(function() {
-    if ($("#options").css("display") === "none") {$("#regenerate").show();}
-  }, function() {
+    if ($("#options").css("display") === "none") {
+      $("#regenerate").show();
+      $("#optionsTrigger").removeClass("glow");
+    }}, function() {
     $("#regenerate").hide();
+    //$("#optionsTrigger").addClass("glow");
   });
 
   // move layers on mapLayers dragging (jquery sortable)
