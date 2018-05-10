@@ -113,7 +113,7 @@ function fantasyMap() {
     viewY = d3.event.transform.y;
     viewbox.attr("transform", d3.event.transform);
     // rescale only if zoom is significally changed
-    if (scaleDiff > 0.0001) {
+    if (scaleDiff > 0.001) {
       invokeActiveZooming();
       drawScaleBar();
     }
@@ -1265,15 +1265,19 @@ function fantasyMap() {
     if (barLabel.value !== "") {
       scaleBar.append("text").attr("x", x + (l+1) / 2).attr("y", y + 2 * size)
         .attr("dominant-baseline", "text-before-edge")
-        .attr("font-size", rn(7 * size, 1)).text(barLabel.value);
+        .attr("font-size", rn(5 * size, 1)).text(barLabel.value);
     }
+    const bbox = scaleBar.node().getBBox();
+    // append backbround rectangle
+    scaleBar.insert("rect", ":first-child").attr("x", -10).attr("y", -20).attr("width", bbox.width + 10).attr("height", bbox.height + 15)
+      .attr("stroke-width", size).attr("stroke", "none").attr("filter", "url(#blur5)")
+      .attr("fill", barBackColor.value).attr("opacity", +barBackOpacity.value);
     // move scaleBar to desired bottom-right point
-    var tr, bbox = scaleBar.node().getBBox();
     if (sessionStorage.getItem("scaleBar")) {
       var scalePos = sessionStorage.getItem("scaleBar").split(",");
-      tr = [+scalePos[0] - bbox.width, +scalePos[1] - bbox.height];
+      var tr = [+scalePos[0] - bbox.width, +scalePos[1] - bbox.height];
     } else {
-      tr = [svgWidth - 10 - bbox.width, svgHeight - bbox.height];
+      var tr = [svgWidth - 10 - bbox.width, svgHeight - bbox.height];
     }
     scaleBar.attr("transform", "translate(" + rn(tr[0]) + "," + rn(tr[1]) + ")");
   }
@@ -4167,7 +4171,7 @@ function fantasyMap() {
                       of the Generator. Please note the Gennerator is still on demo and a lot of crusial changes are made every month`;
         }
         alertMessage.innerHTML = message;
-        $("#alert").dialog({title: "Map version conflict", buttons: {OK: function() {
+        $("#alert").dialog({title: "Warning", buttons: {OK: function() {
           $(this).dialog("close");
           loadDataFromMap(data);
         }}});
@@ -6475,8 +6479,8 @@ function fantasyMap() {
     rivers.attr("opacity", 1).attr("fill", "#5d97bb");
     lakes.attr("opacity", 1).attr("fill", "#a6c1fd").attr("stroke", "#477794").attr("stroke-width", .3);
     burgs.attr("opacity", 1).attr("fill", "#ffffff").attr("stroke", "#3e3e4b");
-    roads.attr("opacity", .8).attr("stroke", "#d06324").attr("stroke-width", .4).attr("stroke-dasharray", "1 2").attr("stroke-linecap", "round");
-    trails.attr("opacity", .8).attr("stroke", "#d06324").attr("stroke-width", .1).attr("stroke-dasharray", ".5 1").attr("stroke-linecap", "round");
+    roads.attr("opacity", .9).attr("stroke", "#d06324").attr("stroke-width", .35).attr("stroke-dasharray", "1.5").attr("stroke-linecap", "butt");
+    trails.attr("opacity", .9).attr("stroke", "#d06324").attr("stroke-width", .15).attr("stroke-dasharray", ".8 1.6").attr("stroke-linecap", "butt");
     searoutes.attr("opacity", .8).attr("stroke", "#ffffff").attr("stroke-width", .2).attr("stroke-dasharray", "1 2").attr("stroke-linecap", "round");
     grid.attr("opacity", 1).attr("stroke", "#808080").attr("stroke-width", .1);
     ruler.attr("opacity", 1).style("display", "none").attr("filter", "url(#dropShadow)");
@@ -6734,6 +6738,12 @@ function fantasyMap() {
     if (id === "barLabel") {
       $("#scaleBar").removeClass("hidden");
       drawScaleBar();
+    }
+    if (id === "barBackOpacity" || id === "barBackColor") {
+      d3.select("#scaleBar > rect")
+        .attr("opacity", +barBackOpacity.value)
+        .attr("fill", barBackColor.value);
+      $("#scaleBar").removeClass("hidden");
     }
   });
 

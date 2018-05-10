@@ -1061,6 +1061,19 @@ div.states button.selectCapital {
     font-family: Georgia;
 }
 
+#scaleBottom {
+  margin: 6px 0 0 6px;
+}
+
+#barBackColor {
+  width: 24px;
+  height: 16px;
+  padding: 0px;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
 #icon-anchor {
     fill: white;
     stroke: #3e3e4b;

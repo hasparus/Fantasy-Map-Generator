@@ -32,8 +32,8 @@
   <script src="libs/quantize.min.js" defer></script>
   <script src="libs/d3-hexbin.v0.2.min.js" defer></script>
   <script src="libs/jquery.ui.touch-punch.min.js" defer></script>
-  <link rel="stylesheet" type="text/css" href="index.css?version=0.56b"/>
-  <link rel="stylesheet" type="text/css" href="icons.css?version=0.56b"/>
+  <link rel="stylesheet" type="text/css" href="index.css?version=0.5606b"/>
+  <link rel="stylesheet" type="text/css" href="icons.css?version=0.5606b"/>
   <link rel="stylesheet" type="text/css" href="https://code.jquery.com/ui/1.12.1/themes/base/jquery-ui.css"/>
 </head>
 <body>
@@ -766,6 +766,10 @@
         <div title="Type area unit name, leave 'square' just to add ² to the distance unit selected above">Area unit: </div>
         <input id="areaUnit" title="Type area unit name, leave 'square' just to add ² to the distance unit selected above" type="text" value="square">
       </div>
+      <div class="scaleHeader">
+        <span class="icon-minus"></span>
+        <div>Scale bar: </div>
+      </div>
       <div>
         <div title="Change scale bar size">Scale bar size: </div>
         <input id="barSize" title="Set scale bar size" type="range" min="0.5" max="4" value="2" step="0.1">
@@ -773,7 +777,12 @@
       </div>
       <div>
         <div title="Change scale bar label, leave blank to hide label">Scale bar label: </div>
-        <input id="barLabel" title="Set scale bar label, leave blank to hide label" type="text" value="">
+        <input id="barLabel" title="Set scale bar label, leave blank to hide label" type="text" placeholder="hidden" value="">
+      </div>
+      <div>
+        <div title="Set background for Scale bar">Background opacity: </div>
+        <input id="barBackOpacity" title="Set Scale bar background opacity" type="range" min="0" max="1" value="0.2" step="0.01">
+        <input id="barBackColor" title="Set Scale bar background color" type="color" value="#ffffff">
       </div>
       <div class="scaleHeader">
         <span class="icon-male"></span>
@@ -822,5 +831,5 @@
     <input type="file" accept=".txt" id="templateToLoad">
   </div>
 
-  <script src="script.js?version=0.56b"></script>
+  <script src="script.js?version=0.5606b"></script>
 </body>
