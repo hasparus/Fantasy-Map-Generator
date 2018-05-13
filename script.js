@@ -71,7 +71,6 @@ function fantasyMap() {
     capitalsCount = regionsOutput.innerHTML = +regionsInput.value,
     neutral = countriesNeutral.value = +neutralInput.value,
     swampiness = +swampinessInput.value,
-    sharpness = +sharpnessInput.value,
     precipitation = +precInput.value;
 
   // Get screen size
@@ -82,7 +81,7 @@ function fantasyMap() {
   svg.attr("width", svgWidth).attr("height", svgHeight);
 
   // D3 Line generator variables
-  var lineGen = d3.line().x(function(d) {return d.scX;}).y(function(d) {return d.scY;});
+  var lineGen = d3.line().x(function(d) {return d.scX;}).y(function(d) {return d.scY;}).curve(d3.curveCatmullRom);
 
   // append ocean pattern
   oceanPattern.append("rect").attr("x", 0).attr("y", 0).attr("width", "100%").attr("height", "100%").attr("fill", "url(#oceanic)").attr("stroke", "none");
@@ -684,7 +683,6 @@ function fantasyMap() {
 
   function add(start, type, height) {
     var session = Math.ceil(Math.random() * 1e5);
-    var sharpness = 0.2;
     var radius, hRadius, mRadius;
     switch (+graphSize) {
       case 1: hRadius = 0.991; mRadius = 0.91; break;
@@ -703,8 +701,7 @@ function fantasyMap() {
       }
       cells[queue[i]].neighbors.forEach(function(e) {
         if (cells[e].used === session) {return;}
-        var mod = Math.random() * sharpness + 1.1 - sharpness;
-        if (sharpness == 0) {mod = 1;}
+        var mod = Math.random() * 0.2 + 0.9;
         cells[e].height += height * mod;
         if (cells[e].height > 1) {cells[e].height = 1;}
         cells[e].used = session;
@@ -1171,7 +1168,6 @@ function fantasyMap() {
   // Detect and draw the coasline
   function drawCoastline() {
     console.time('drawCoastline');
-    getCurveType();
     var oceanCoastline = "", lakeCoastline = "";
     $("#landmass").empty();
     var minX = graphWidth, maxX = 0; // extreme points
@@ -2073,7 +2069,7 @@ function fantasyMap() {
     // get route type
     const group = d3.select(this.parentNode);
     routeUpdateGroups();
-    const routeType = group.attr("id");
+    let routeType = group.attr("id");
     routeType.value = routeType;
 
     $("#routeEditor").dialog({
@@ -2126,6 +2122,8 @@ function fantasyMap() {
         const p = node.getPointAtLength(i);
         addRoutePoint(p);
       }
+      // convert length to distance
+      routeLength.innerHTML = rn(l * distanceScale.value) + " " + distanceUnit.value;
     }
 
     function addRoutePoint(point) {
@@ -2155,6 +2153,9 @@ function fantasyMap() {
       });
       lineGen.curve(d3.curveCatmullRom.alpha(0.1));
       elSelected.attr("d", lineGen(points));
+      // get route distance
+      const l = elSelected.node().getTotalLength();
+      routeLength.innerHTML = rn(l * distanceScale.value) + " " + distanceUnit.value;
     }
 
     function newRouteAddPoint() {
@@ -2261,7 +2262,6 @@ function fantasyMap() {
     console.group('manorsAndRegions');
     calculateChains();
     rankPlacesGeography();
-    getCurveType();
     locateCultures();
     locateCapitals();
     generateMainRoads();
@@ -3927,16 +3927,6 @@ function fantasyMap() {
       ("0" + parseInt(rgb[3],10).toString(16)).slice(-2) : '';
   }
 
-  // get Curve Type
-  function getCurveType() {
-    type = curveType.value;
-    if (type === "Catmull–Rom") {lineGen.curve(d3.curveCatmullRom);}
-    if (type === "Linear") {lineGen.curve(d3.curveLinear);}
-    if (type === "Basis") {lineGen.curve(d3.curveBasisClosed);}
-    if (type === "Cardinal") {lineGen.curve(d3.curveCardinal);}
-    if (type === "Step") {lineGen.curve(d3.curveStep);}
-  }
-
   // round value to d decimals
   function rn(v, d) {
      var d = d || 0;
@@ -5480,7 +5470,7 @@ function fantasyMap() {
     console.time("loadImage");
     // set style
     resetZoom();
-    grid.attr("stroke-width", .3);
+    grid.attr("stroke-width", .2);
     // load image
     var file = this.files[0];
     this.value = ""; // reset input value to get triggered if the same file is uploaded
@@ -5934,7 +5924,7 @@ function fantasyMap() {
       $("#countriesBody > div").each(function(e, i) {
         total += +$(this).attr("data-population");
       });
-      countriesFooterPopulation.innerHTML = si(total * 1000);
+      countriesFooterPopulation.innerHTML = si(total);
       if (states[s].capital === "neutral") {s = "neutral";}
       manors.map(function(m) {
         if (m.region !== s) {return;}
@@ -6677,7 +6667,6 @@ function fantasyMap() {
     if (id === "powerInput") {powerOutput.value = this.value;}
     if (id === "neutralInput") {neutral = neutralOutput.value = this.value;}
     if (id === "swampinessInput") {swampiness = swampinessOutput.value = this.value;}
-    if (id === "sharpnessInput") {sharpness = sharpnessOutput.value = this.value;}
     if (id === "precInput") {
       precipitation = precOutput.value = +precInput.value;
       if (randomizeInput.value === "1") {

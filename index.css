@@ -231,6 +231,14 @@ button, select, a {
     dominant-baseline: central;
 }
 
+#routeLength {
+  background-color: #f3f3f3;
+  border: 1px solid #a5a5a5;
+  padding: 3px;
+  font-size: 11px;
+  cursor: default;
+}
+
 .tag {
     fill: #fffa90;
     stroke: #333333;
@@ -681,7 +689,7 @@ body button.noicon {
 }
 
 .selectedColor {
-    border-color: red;
+  outline: 2px solid #f87b66;
 }
 
 #colorScheme {

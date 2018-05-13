@@ -32,8 +32,8 @@
   <script src="libs/quantize.min.js" defer></script>
   <script src="libs/d3-hexbin.v0.2.min.js" defer></script>
   <script src="libs/jquery.ui.touch-punch.min.js" defer></script>
-  <link rel="stylesheet" type="text/css" href="index.css?version=0.5606b"/>
-  <link rel="stylesheet" type="text/css" href="icons.css?version=0.5606b"/>
+  <link rel="stylesheet" type="text/css" href="index.css?version=0.5607b"/>
+  <link rel="stylesheet" type="text/css" href="icons.css?version=0.5607b"/>
   <link rel="stylesheet" type="text/css" href="https://code.jquery.com/ui/1.12.1/themes/base/jquery-ui.css"/>
 </head>
 <body>
@@ -339,7 +339,7 @@
           <tr>
             <td title="Define how many Settlements should be placed">Burgs count</td>
             <td>
-              <input id="manorsInput" type="range" min="0" max="1000" value="500">
+              <input id="manorsInput" type="range" min="0" max="999" value="500">
             </td>
             <td>
               <output id="manorsOutput">500</output>
@@ -391,15 +391,6 @@
             </td>
           </tr>
           <tr>
-            <td title="Define the coastline sharpness. Decrease for a more round land shape">Coastline curvature</td>
-            <td>
-              <input id="sharpnessInput" type="range" min="0.1" max="0.2" value="0.2" step="0.05">
-            </td>
-            <td>
-              <output id="sharpnessOutput">0.2</output>
-            </td>
-          </tr>
-          <tr>
             <td title="Define the Land outline layers scheme">Coast outline layers</td>
             <td>
               <select id="outlineLayers">
@@ -410,19 +401,6 @@
                 <option value="-9,-8,-7,-6,-5,-4,-3,-2,-1">-9,-8,-7,-6,-5,-4,-3,-2,-1</option>
                 <option value="-6,-4,-2">-6,-4,-2</option>
                 <option value="-8,-6,-4,-2">-8,-6,-4,-2</option>
-              </select>
-            </td>
-            <td></td>
-          </tr>
-          <tr>
-            <td title="Select the coastline rendering style">Coastline style</td>
-            <td>
-              <select id="curveType">
-                <option value="Catmull–Rom" selected>Catmull–Rom</option>
-                <option value="Linear">Linear</option>
-                <option value="Basis">Basis</option>
-                <option value="Cardinal">Cardinal</option>
-                <option value="Step">Step</option>
               </select>
             </td>
             <td></td>
@@ -501,8 +479,8 @@
     <select id="editFontSelect" class="editTrigger" title="Select one of the default Fonts"></select>
     <input id="editFontInput" placeholder="link to @font-face" title="Fetch fonts by linking @font-face declaration" class="editTrigger"/>
     <i id="editSizeIcon" class="icon-text-height"></i>
-    <input id="editSize" title="Change Font size for the entire Group" class="editTrigger" value="14" type="number" min="1" max="100" step=".5"/>
-    <button id="editStyleButton" title="Select Color for the entire Group" class="editButton icon-brush"></button>
+    <input id="editSize" title="Change Font size for the label Group" class="editTrigger" value="14" type="number" min="1" max="100" step=".5"/>
+    <button id="editStyleButton" title="Select text color and opacity for the label Group" class="editButton icon-brush"></button>
     <input id="editColor" type="color" class="editTrigger" value="#3e3e4b">
     <i id="editOpacityIcon" class="icon-adjust"></i>
     <input id="editOpacity" title="Change Opacity for the entire Group" class="editTrigger" value="1" type="number" min="0" max="1" step="0.02">
@@ -543,6 +521,7 @@
     <div id="routeGroupsSelection" style="display: none">
       <select id="routeGroup" title="Select a group for this route"></select>
     </div>
+    <button id="routeLength"></button>
     <button id="routeSplit" title="Click on a control point to split the route" class="icon-unlink" onclick="$(this).toggleClass('pressed')"></button>
     <button id="routeNew" title="Create new route clicking on map" class="icon-map-pin"></button>
     <button id="routeRemove" title="Remove route" class="icon-trash"></button>
@@ -592,7 +571,7 @@
       <button id="convertAutoLum" title="Auto-assign colors based on liminosity" class="icon-adjust"></button>
       <button id="convertAutoHue" title="Auto-assign colors based on hue" class="icon-brush"></button>
       <button id="convertColorsMinus" title="Reduce the number of colors. Minimal number is 3" class="icon-minus-squared"></button>
-      <button id="convertColorsPlus" title="Increase the number of colors. Minimal number is 256" class="icon-plus-squared"></button>
+      <button id="convertColorsPlus" title="Increase the number of colors. Maximum number is 256" class="icon-plus-squared"></button>
       <input id="convertColors" value="12" style="display: none;"/>
       <button id="convertImageGrid" title="Toggle grid" class="icon-eye"></button>
       <button id="convertOverlayButton" title="Change overlay opacity" class="icon-clone"></button>
@@ -831,5 +810,5 @@
     <input type="file" accept=".txt" id="templateToLoad">
   </div>
 
-  <script src="script.js?version=0.5606b"></script>
+  <script src="script.js?version=0.5607b"></script>
 </body>
