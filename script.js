@@ -4400,6 +4400,8 @@ function fantasyMap() {
     switch(d3.event.keyCode) {
       case 27: // Escape to close all dialogs
         closeDialogs();
+        break;
+      case 79: // "O" to toggle options
         optionsTrigger.click();
         break;
       case 113: // "F2" for new map
@@ -4442,12 +4444,12 @@ function fantasyMap() {
       case 9: // Tab to toggle full-screen mode
         $("#updateFullscreen").click();
         break;
-      case 90: // Ctrl + Z to toggle undo
+      case 90: // Ctrl + "Z" to toggle undo
         if (customization !== 1) return;
         if (d3.event.ctrlKey === false) return;
         undo.click();
         break;
-      case 89: // Ctrl + Y to toggle undo
+      case 89: // Ctrl + "Y" to toggle undo
         if (customization !== 1) return;
         if (d3.event.ctrlKey === false) return;
         redo.click();
