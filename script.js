@@ -92,8 +92,8 @@ function fantasyMap() {
   // toggle off loading screen and on menus
   $("#loading, #initial").remove();
   svg.style("background-color", "#000000");
-  $("#optionsContainer").show();
-  fitStatusBar();
+  $("#optionsContainer, #tooltip").show();
+  fitTooltip();
 
   $("#optionsContainer").draggable({handle: ".drag-trigger", snap: "svg", snapMode: "both"});
   $("#mapLayers").sortable({items: "li:not(.solid)", cancel: ".solid", update: moveLayer});
@@ -255,15 +255,28 @@ function fantasyMap() {
   function moved() {
     var point = d3.mouse(this);
     var i = diagram.find(point[0], point[1]).index;
+
+    // update cellInfo
     if (i) {
-      var p = cells[i]; // get cell
-      $("#lx").text(rn(point[0]));
-      $("#ly").text(rn(point[1]));
-      $("#cell").text(i);
-      $("#height").text(ifDefined(p.height, 2));
-      $("#feature").text(ifDefined(p.feature) + "" + ifDefined(p.featureNumber)); // to support v. >0.54b
-      $("#feature").text(ifDefined(p.f) + "" + ifDefined(p.fn));
+      const p = cells[i]; // get cell
+      infoX.innerHTML = rn(point[0]);
+      infoY.innerHTML = rn(point[1]);
+      infoCell.innerHTML = i;
+      infoHeight.innerHTML = ifDefined(p.height, "n/a", 2);
+      infoFlux.innerHTML = ifDefined(p.flux, "n/a", 2);
+      infoFeature.innerHTML = ifDefined(p.f) + "" + ifDefined(p.fn);
+      let country = p.region === undefined ? "n/a" : p.region === "neutral" ? "neutral" : states[p.region].name + " (" + p.region + ")";
+      infoCountry.innerHTML = country;
+      let culture = ifDefined(p.culture) !== "no" ? cultures[p.culture] + " (" + p.culture + ")" : "n/a";
+      infoCulture.innerHTML = culture;
+      infoBurg.innerHTML = ifDefined(p.manor) !== "no" ? manors[p.manor].name + " (" + p.manor + ")" : "no";
     }
+
+    // update tooltip
+    if (toggleTooltips.checked) {
+      tooltip.innerHTML = tooltip.getAttribute("data-main");
+    }
+
     // draw line for Customization range placing
     icons.selectAll(".line").remove();
     if (customization === 1 && icons.selectAll(".tag").size() === 1) {
@@ -295,11 +308,12 @@ function fantasyMap() {
     } else {circle.remove();}
   }
 
-  // return value (e) if defined with specified number of decimals (f)
-  function ifDefined(e, f) {
-    if (e == undefined) {return "no";}
-    if (f) {return e.toFixed(f);}
-    return e;
+  // return value (v) if defined with specified number of decimals (d)
+  // else return "no" or attribute (r)
+  function ifDefined(v, r, d) {
+    if (v == undefined) {return r || "no";}
+    if (d) {return v.toFixed(d);}
+    return v;
   }
 
   // Drag actions
@@ -1139,8 +1153,8 @@ function fantasyMap() {
     var elevationAverage = rn(d3.mean(heights), 2);
     var landRatio = rn(landCells / cells.length * 100);
     landmassCounter.innerHTML = landCells + " (" + landRatio + "%); Average Elevation: " + elevationAverage;
-    if (landCells > 100) {$("#getMap").attr("disabled", false).removeClass("buttonoff");}
-    else {$("#getMap").attr("disabled", true).addClass("buttonoff");}
+    if (landCells > 100) {$("#getMap").attr("disabled", false).removeClass("buttonoff").addClass("glow");}
+    else {$("#getMap").attr("disabled", true).addClass("buttonoff").removeClass("glow");}
     // if perspective is displayed, update it
     if ($("#perspectivePanel").is(":visible")) {drawPerspective();}
   }
@@ -2599,6 +2613,7 @@ function fantasyMap() {
       if (portsOnIsland.length) {ports.push(portsOnIsland);}
     }
     ports.sort(function(a, b) {return b.length - a.length;});
+    burgs.select("#anchors").remove();
     const anchors = burgs.append("g").attr("id", "anchors");
     for (var i = 0; i < ports.length; i++) {
       var start = ports[i][0].index;
@@ -4297,7 +4312,6 @@ function fantasyMap() {
     if (regions.attr("display") === "none") {$("#toggleCountries").addClass("buttonoff");} else {$("#toggleCountries").removeClass("buttonoff");}
     if (rivers.attr("display") === "none") {$("#toggleRivers").addClass("buttonoff");} else {$("#toggleRivers").removeClass("buttonoff");}
     if (oceanPattern.attr("display") === "none") {$("#toggleOcean").addClass("buttonoff");} else {$("#toggleOcean").removeClass("buttonoff");}
-    if (landmass.attr("display") === "none") {$("#landmass").addClass("buttonoff");} else {$("#landmass").removeClass("buttonoff");}
     if (terrain.attr("display") === "none") {$("#toggleRelief").addClass("buttonoff");} else {$("#toggleRelief").removeClass("buttonoff");}
     if (borders.attr("display") === "none") {$("#toggleBorders").addClass("buttonoff");} else {$("#toggleBorders").removeClass("buttonoff");}
     if (burgs.attr("display") === "none") {$("#toggleIcons").addClass("buttonoff");} else {$("#toggleIcons").removeClass("buttonoff");}
@@ -4384,6 +4398,10 @@ function fantasyMap() {
   d3.select("body").on("keydown", function() {
     $("input").on("keydown", function(e) {e.stopPropagation();}); // cancel on input
     switch(d3.event.keyCode) {
+      case 27: // Escape to close all dialogs
+        closeDialogs();
+        optionsTrigger.click();
+        break;
       case 113: // "F2" for new map
         $("#randomMap").click();
         break;
@@ -4424,11 +4442,25 @@ function fantasyMap() {
       case 9: // Tab to toggle full-screen mode
         $("#updateFullscreen").click();
         break;
+      case 90: // Ctrl + Z to toggle undo
+        if (customization !== 1) return;
+        if (d3.event.ctrlKey === false) return;
+        undo.click();
+        break;
+      case 89: // Ctrl + Y to toggle undo
+        if (customization !== 1) return;
+        if (d3.event.ctrlKey === false) return;
+        redo.click();
+        break;
       }
   });
 
   // Toggle Options pane
   $("#optionsTrigger").on("click", function() {
+    if (tooltip.getAttribute("data-main") === "Сlick the arrow button to open options") {
+      tooltip.setAttribute("data-main", "");
+      tooltip.innerHTML = "";
+    }
     if ($("#options").css("display") === "none") {
       $("#regenerate").hide();
       $("#options").fadeIn();
@@ -4479,26 +4511,8 @@ function fantasyMap() {
     var parent = this.parentNode.id;
     if (icons.selectAll(".tag").size() > 0) {icons.selectAll(".tag, .line").remove();}
     if (id === "toggleHeight") {toggleHeight();}
-    if (id === "toggleCountries") {
-      var countries = !$("#toggleCountries").hasClass("buttonoff");
-      var cultures = !$("#toggleCultures").hasClass("buttonoff");
-      if (!countries && cultures) {
-        $("#toggleCultures").toggleClass("buttonoff");
-        toggleCultures();
-      }
-      $('#regions').fadeToggle();
-      return;
-    }
-    if (id === "toggleCultures") {
-      var countries = !$("#toggleCountries").hasClass("buttonoff");
-      var cultures = !$("#toggleCultures").hasClass("buttonoff");
-      if (!cultures && countries) {
-        $("#toggleCountries").toggleClass("buttonoff");
-        $('#regions').fadeToggle();
-      }
-      toggleCultures();
-      return;
-    }
+    if (id === "toggleCountries") {$('#regions').fadeToggle();}
+    if (id === "toggleCultures") {toggleCultures();}
     if (id === "toggleOverlay") {toggleOverlay();}
     if (id === "toggleFlux") {toggleFlux();}
     if (parent === "mapLayers" || parent === "styleContent") {$(this).toggleClass("buttonoff");}
@@ -4652,9 +4666,11 @@ function fantasyMap() {
       var dataBlob = new Blob([data], {type:"text/plain"});
       var url = window.URL.createObjectURL(dataBlob);
       var link = document.createElement("a");
+      document.body.appendChild(link);
       link.download = "countries_data" + Date.now() + ".csv";
       link.href = url;
       link.click();
+      window.setTimeout(function() {window.URL.revokeObjectURL(url);}, 2000);
     }
     if (id === "burgNamesImport") {burgsListToLoad.click();}
     if (id === "removeCountries") {
@@ -4824,8 +4840,8 @@ function fantasyMap() {
             $(this).dialog("close");
           },
           Keep: function() {
-            editHeightmap("keep");
             $(this).dialog("close");
+            editHeightmap("keep");
           },
           Cancel: function() {$(this).dialog("close");}
         }
@@ -5647,7 +5663,8 @@ function fantasyMap() {
 
   // Clear the map
   function undraw() {
-    svg.selectAll("path, circle, line, text, #ruler > g").remove();
+    viewbox.selectAll("path, circle, line, text, #ruler > g").remove();
+    defs.selectAll("path").remove();
     cells = [], land = [], riversData = [], manors = [], states = [], queue = [];
   }
 
@@ -5660,6 +5677,7 @@ function fantasyMap() {
     $('#grid').fadeIn();
     $('#toggleGrid').removeClass("buttonoff");
     restartHistory();
+    $("#openEditor").slideToggle();
   }
 
   // Remove all customization related styles, reset values
@@ -5676,6 +5694,9 @@ function fantasyMap() {
     closeDialogs();
     history = [];
     historyStage = 0;
+    $("#openEditor, #customizeHeightmap").slideToggle();
+    $("#getMap").removeClass("glow");
+    icons.selectAll(".circle").remove();
   }
 
   // open editCountries dialog
@@ -6428,7 +6449,7 @@ function fantasyMap() {
     svg.attr("width", svgWidth).attr("height", svgHeight);
     zoom.translateExtent([[0, 0], [svgWidth, svgHeight]]);
     fitScaleBar();
-    fitStatusBar();
+    fitTooltip();
   }
 
   // fit full-screen map if window is resized
@@ -6450,11 +6471,9 @@ function fantasyMap() {
     }
   }
 
-  // fit Statusbar to map size
-  function fitStatusBar() {
-    var el = $("#statusbar");
-    el.css("top", svgHeight - 20);
-    if (toggleStatusbar.checked) {el.show();}
+  // fit Tooltip line to map size
+  function fitTooltip() {
+    tooltip.style.top = svgHeight - 40;
   }
 
   // restore initial style
@@ -6499,7 +6518,7 @@ function fantasyMap() {
       var opacity = el.attr("opacity") || 1;
       styleOpacityInput.value = styleOpacityOutput.value = opacity;
       // filter
-      if (sel == "oceanBase") {el = oceanLayers;}
+      if (sel == "oceanBase") {el = oceanLayers.select("rect");}
       styleFilterInput.value = el.attr("filter") || "";
       if (sel === "rivers" || sel === "oceanBase" || sel === "lakes" || sel === "landmass" || sel === "burgs") {
         $("#styleFill").css("display", "inline-block");
@@ -6612,7 +6631,7 @@ function fantasyMap() {
       if (sel == "oceanBase") {sel = "oceanLayers";}
       var el = svg.select("#"+sel);
       el.attr('filter', this.value);
-      invokeActiveZooming();
+      zoom.scaleBy(svg, 1.00001); // enforce browser re-draw
       return;
     }
     if (id === "styleSchemeInput") {
@@ -6746,9 +6765,9 @@ function fantasyMap() {
 
   $("#layoutPreset").on("change", function() {
     var preset = this.value;
-    $("#mapLayers li").not("#toggleOcean, #toggleLandmass").addClass("buttonoff");
-    $("#toggleOcean, #toggleLandmass").removeClass("buttonoff");
-    $("#oceanPattern, #landmass").fadeIn();
+    $("#mapLayers li").not("#toggleOcean").addClass("buttonoff");
+    $("#toggleOcean").removeClass("buttonoff");
+    $("#oceanPattern").fadeIn();
     $("#rivers, #terrain, #borders, #regions, #burgs, #labels, #routes, #grid").fadeOut();
     cults.selectAll("path").remove();
     terrs.selectAll("path").remove();
@@ -6835,3 +6854,12 @@ function fantasyMap() {
     });
   }
 }
+
+function tip(tip, main) {
+  tooltip.innerHTML = tip;
+  if (main) {tooltip.setAttribute("data-main", tip);}
+}
+
+$("#optionsContainer *").on("mouseout", function() {
+  tooltip.innerHTML = tooltip.getAttribute("data-main");
+});

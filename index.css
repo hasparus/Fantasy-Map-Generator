@@ -482,15 +482,27 @@ p {
     font-family: monospace;
 }
 
-#statusbar {
-	display: none;
-	position: absolute;
-	font-family: monospace;
-	margin-left: 10px;
-	color: #272727;
-  word-wrap: break-word;
-  font-size: calc(2px + 1vw);
+#cellInfo > div {
+  margin: 5px;
+  display: inline-block;
+  vertical-align: top;
+}
 
+#cellInfo > div:nth-child(2) {
+  width: 35%;
+}
+
+#tooltip {
+  position: absolute;
+  display: none;
+  text-align: center;
+  top: 96%;
+  width: 100%;
+  cursor: default;
+  text-shadow: 1px 0px 1px #1d0e0f;
+  color: #ffffff;
+  font-size: calc(10px + 0.5vw);
+  pointer-events: none;
 }
 
 #optionsContent table td:nth-of-type(1) {
@@ -1182,18 +1194,18 @@ input[type="checkbox"] {
 .checkbox + .checkbox-label:before {
   content: '';
   background: #ece6eb;
-  border-radius: 3px;
+  border-radius: 1px;
   display: inline-block;
   vertical-align: text-top;
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   padding: 2px;
-  margin-right: 2px;
+  margin-right: 3px;
 }
 
 .checkbox:checked + .checkbox-label:before {
-  background: #b19aa6;
-  transition: .1s;
+  background: #997c89;
+  transition: .2s;
   box-shadow: inset 0px 0px 0px 2px #ece6ea;
 }
 
