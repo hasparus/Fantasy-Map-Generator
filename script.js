@@ -32,7 +32,6 @@ function fantasyMap() {
     searoutes = routes.append("g").attr("id", "searoutes").attr("data-type", "sea"),
     labels = viewbox.append("g").attr("id", "labels"),
     icons = viewbox.append("g").attr("id", "icons"),
-    burgs = icons.append("g").attr("id", "burgs"),
     ruler = viewbox.append("g").attr("id", "ruler"),
     debug = viewbox.append("g").attr("id", "debug"),
     capitals = labels.append("g").attr("id", "capitals"),
@@ -2272,6 +2271,141 @@ function fantasyMap() {
     });
   }
 
+  function editIcon() {
+    if (customization) {return;}
+    if (elSelected) {
+      const self = d3.select(this).attr("id") === elSelected.attr("id") ? true : false;
+      if (self) {return;}
+    }
+
+    unselect();
+    closeDialogs("#iconEditor, .stable");
+    elSelected = d3.select(this).call(d3.drag().on("start", elementDrag));
+
+    // update group parameters
+    const group = d3.select(this.parentNode);
+    iconUpdateGroups();
+    iconGroup.value = group.attr("id");
+    iconFillColor.value = group.attr("fill");
+    iconStrokeColor.value = group.attr("stroke");
+    iconRadius.value = group.attr("size");
+    iconStrokeWidth.value = group.attr("stroke-width");
+
+    $("#iconEditor").dialog({
+      title: "Edit " + group.attr("id") + " icon",
+      minHeight: 30, width: "auto", resizable: false,
+      position: {my: "center top+20", at: "top", of: d3.event},
+      close: unselect
+    });
+
+    if (modules.editIcon) {return;}
+    modules.editIcon = true;
+
+    $("#iconGroups").click(function() {
+      $("#iconEditor > button").not(this).toggle();
+      $("#iconGroupsSelection").toggle();
+    });
+
+    function iconUpdateGroups() {
+      iconGroup.innerHTML = "";
+      const anchor = group.attr("id").includes("anchor");
+      icons.selectAll("g").each(function(d) {
+        const id = d3.select(this).attr("id");
+        if (!anchor && id.includes("anchor")) {return;}
+        if (anchor && !id.includes("anchor")) {return;}
+        const opt = document.createElement("option");
+        opt.value = opt.innerHTML = id;
+        iconGroup.add(opt);
+      });
+    }
+
+    $("#iconGroup").change(function() {
+      const newGroup = this.value;
+      const to = $("#icons > #"+newGroup);
+      $(elSelected.node()).detach().appendTo(to);
+      const size = to.attr("size");
+      const type = elSelected.node().nodeName;
+      if (type === "circle") {
+        elSelected.attr("r", size);
+      } else if (type === "use") {
+        elSelected.attr("width", size).attr("height", size);
+      }
+    });
+
+    $("#iconRemoveGroup").click(function() {
+      const group = d3.select(elSelected.node().parentNode);
+      const count = group.selectAll("*").size();
+      if (count < 2) {
+        group.remove();
+        $("#labelEditor").dialog("close");
+        return;
+      }
+      const message = "Are you sure you want to remove all '" + iconGroup.value + "' icons (" + count + ")?";
+      alertMessage.innerHTML = message;
+      $("#alert").dialog({resizable: false, title: "Remove icon group",
+        buttons: {
+          Remove: function() {
+            $(this).dialog("close");
+            group.remove();
+            $("#iconEditor").dialog("close");
+          },
+          Cancel: function() {$(this).dialog("close");}
+        }
+      });
+    });
+
+    $("#iconColors").click(function() {
+      $("#iconEditor > button").not(this).toggle();
+      $("#iconColorsSection").toggle();
+    });
+
+    $("#iconFillColor").change(function() {
+      const group = d3.select(elSelected.node().parentNode);
+      group.attr("fill", this.value);
+    });
+
+    $("#iconStrokeColor").change(function() {
+      const group = d3.select(elSelected.node().parentNode);
+      group.attr("stroke", this.value);
+    });
+
+    $("#iconSize").click(function() {
+      $("#iconEditor > button").not(this).toggle();
+      $("#iconSizeSection").toggle();
+    });
+
+    $("#iconRadius").change(function() {
+      const group = d3.select(elSelected.node().parentNode);
+      const size = this.value;
+      group.attr("size", size);
+      const type = elSelected.node().nodeName;
+      if (type === "circle") {
+        group.selectAll("circle").attr("r", size);
+      } else if (type === "use") {
+        group.selectAll("use").attr("width", size).attr("height", size);
+      }
+    });
+
+    $("#iconStrokeWidth").change(function() {
+      const group = d3.select(elSelected.node().parentNode);
+      group.attr("stroke-width", this.value);
+    });
+
+    $("#iconRemove").click(function() {
+      alertMessage.innerHTML = `Are you sure you want to remove the icon?`;
+      $("#alert").dialog({resizable: false, title: "Remove icon",
+        buttons: {
+          Remove: function() {
+            $(this).dialog("close");
+            elSelected.remove();
+            $("#iconEditor").dialog("close");
+          },
+          Cancel: function() {$(this).dialog("close");}
+        }
+      })
+    });
+  }
+
   function manorsAndRegions() {
     console.group('manorsAndRegions');
     calculateChains();
@@ -2613,8 +2747,11 @@ function fantasyMap() {
       if (portsOnIsland.length) {ports.push(portsOnIsland);}
     }
     ports.sort(function(a, b) {return b.length - a.length;});
-    burgs.select("#anchors").remove();
-    const anchors = burgs.append("g").attr("id", "anchors");
+    icons.select("#anchors").remove();
+    const cAnchors = icons.append("g").attr("id", "capital-anchors")
+      .attr("fill", "#ffffff").attr("stroke", "#3e3e4b").attr("stroke-width", 1.2).attr("size", 2.2);
+    const tAnchors = icons.append("g").attr("id", "town-anchors")
+      .attr("fill", "#ffffff").attr("stroke", "#3e3e4b").attr("stroke-width", 1.2).attr("size", 1);
     for (var i = 0; i < ports.length; i++) {
       var start = ports[i][0].index;
       var paths = findOceanPaths(start, -1);
@@ -2622,10 +2759,16 @@ function fantasyMap() {
       for (var p = 0; p < ports[i].length; p++) {
         var x = ports[i][p].data[0];
         var y = ports[i][p].data[1];
-        anchors.append("use").attr("xlink:href", "#icon-anchor")
-          .attr("x", x - 0.5).attr("y", y - 0.44).attr("width", 1).attr("height", 1)
-          .call(d3.drag().on("start", elementDrag));
+        const capital = ports[i][p].manor === ports[i][p].region;
+        if (capital) {
+          cAnchors.append("use").attr("xlink:href", "#icon-anchor")
+            .attr("x", x - 1.1).attr("y", y - 1).attr("width", 2.2).attr("height", 2.2);
+        } else {
+          tAnchors.append("use").attr("xlink:href", "#icon-anchor")
+            .attr("x", x - .5).attr("y", y - .44).attr("width", 1).attr("height", 1)
+        }
       }
+      icons.selectAll("use").on("click", editIcon);
       var length = ports[i].length; // ports on island
       // routes from all ports on island to 1st port on island
       for (var h = 1; h < length; h++) {
@@ -2844,21 +2987,25 @@ function fantasyMap() {
   // For each non-capital manor detect the closes capital (used for areas)
   function drawManors() {
     console.time('drawManors');
+    const iCapitals = icons.append("g").attr("id", "capitals").attr("size", 1)
+      .attr("stroke-width", .24).attr("opacity", 1).attr("fill", "#ffffff").attr("stroke", "#3e3e4b");
+    const iTowns = icons.append("g").attr("id", "towns").attr("size", .5)
+      .attr("stroke-width", .12).attr("opacity", 1).attr("fill", "#ffffff").attr("stroke", "#3e3e4b");
     for (var i = 0; i < manors.length; i++) {
       var x = manors[i].x;
       var y = manors[i].y;
       var cell = manors[i].cell;
       var name = manors[i].name;
       if (i < capitalsCount) {
-        burgs.append("circle").attr("id", "manorIcon"+i).attr("r", 1).attr("stroke-width", .24).attr("cx", x).attr("cy", y);
+        iCapitals.append("circle").attr("id", "manorIcon"+i).attr("r", 1).attr("cx", x).attr("cy", y);
         capitals.append("text").attr("id", "manorLabel"+i).attr("x", x).attr("y", y).attr("dy", -1.3).text(name);
       } else {
-        burgs.append("circle").attr("id", "manorIcon"+i).attr("r", .5).attr("stroke-width", .12).attr("cx", x).attr("cy", y);
+        iTowns.append("circle").attr("id", "manorIcon"+i).attr("r", .5).attr("cx", x).attr("cy", y);
         towns.append("text").attr("id", "manorLabel"+i).attr("x", x).attr("y", y).attr("dy", -.7).text(name);
       }
     }
     labels.selectAll("text").on("click", editLabel);
-    burgs.selectAll("circle").call(d3.drag().on("start", elementDrag));
+    icons.selectAll("circle").on("click", editIcon);
     console.timeEnd('drawManors');
   }
 
@@ -3473,8 +3620,8 @@ function fantasyMap() {
         return;
       }
       var i = manors.length;
-      burgs.append("circle").attr("id", "manorIcon"+i).attr("r", .5).attr("stroke-width", .12)
-        .attr("cx", x).attr("cy", y).call(d3.drag().on("start", elementDrag));
+      icons.select("#towns").append("circle").attr("id", "manorIcon"+i).attr("r", .5)
+        .attr("cx", x).attr("cy", y).on("click", editIcon);
       var group = labels.select("#addedBurgs");
       if (!group.size()) {
         group = labels.append("g").attr("id", "addedBurgs")
@@ -4270,7 +4417,6 @@ function fantasyMap() {
     searoutes = routes.select("#searoutes");
     labels = viewbox.select("#labels");
     icons = viewbox.select("#icons");
-    burgs = icons.select("#burgs");
     debug = viewbox.select("#debug");
     capitals = labels.select("#capitals");
     towns = labels.select("#towns");
@@ -4283,7 +4429,7 @@ function fantasyMap() {
     viewbox.on("touchmove mousemove", moved);
     overlay.selectAll("*").call(d3.drag().on("start", elementDrag));
     labels.selectAll("text").on("click", editLabel);
-    burgs.selectAll("circle").call(d3.drag().on("start", elementDrag));
+    icons.selectAll("circle, path, use").on("click", editIcon);
     rivers.selectAll("path").on("click", editRiver);
     routes.selectAll("path").on("click", editRoute);
     svg.select("#scaleBar").call(d3.drag().on("start", elementDrag)).on("click", editScale);
@@ -4314,7 +4460,7 @@ function fantasyMap() {
     if (oceanPattern.attr("display") === "none") {$("#toggleOcean").addClass("buttonoff");} else {$("#toggleOcean").removeClass("buttonoff");}
     if (terrain.attr("display") === "none") {$("#toggleRelief").addClass("buttonoff");} else {$("#toggleRelief").removeClass("buttonoff");}
     if (borders.attr("display") === "none") {$("#toggleBorders").addClass("buttonoff");} else {$("#toggleBorders").removeClass("buttonoff");}
-    if (burgs.attr("display") === "none") {$("#toggleIcons").addClass("buttonoff");} else {$("#toggleIcons").removeClass("buttonoff");}
+    if (icons.attr("display") === "none") {$("#toggleIcons").addClass("buttonoff");} else {$("#toggleIcons").removeClass("buttonoff");}
     if (labels.attr("display") === "none") {$("#toggleLabels").addClass("buttonoff");} else {$("#toggleLabels").removeClass("buttonoff");}
     if (routes.attr("display") === "none") {$("#toggleRoutes").addClass("buttonoff");} else {$("#toggleRoutes").removeClass("buttonoff");}
     if (grid.attr("display") === "none") {$("#toggleGrid").addClass("buttonoff");} else {$("#toggleGrid").removeClass("buttonoff");}
@@ -5674,12 +5820,12 @@ function fantasyMap() {
   function customizeHeightmap() {
     customization = 1;
     resetZoom();
-    $("#customizationMenu").slideDown();
     landmassCounter.innerHTML = "0";
     $('#grid').fadeIn();
     $('#toggleGrid').removeClass("buttonoff");
     restartHistory();
-    $("#openEditor").slideToggle();
+    $("#customizationMenu").slideDown();
+    $("#openEditor").slideUp();
   }
 
   // Remove all customization related styles, reset values
@@ -5696,7 +5842,8 @@ function fantasyMap() {
     closeDialogs();
     history = [];
     historyStage = 0;
-    $("#openEditor, #customizeHeightmap").slideToggle();
+    $("#customizeHeightmap").slideUp();
+    $("#openEditor").slideDown();
     $("#getMap").removeClass("glow");
     icons.selectAll(".circle").remove();
   }
@@ -5902,9 +6049,8 @@ function fantasyMap() {
         if (cells[index].port) {score *= 3;} // port-capital
         var population = rn(score, 1);
         manors.push({i, cell:index, x, y, region: state, culture, name, population});
-        burgs.append("circle").attr("id", "manorIcon"+i)
-          .attr("r", 1).attr("stroke-width", .24).attr("cx", x)
-          .attr("cy", y).call(d3.drag().on("start", elementDrag));
+        icons.select("#capitals").append("circle").attr("id", "manorIcon"+i)
+          .attr("r", 1).attr("cx", x).attr("cy", y).on("click", editIcon);
         group.append("text").attr("id", "manorLabel"+i)
           .attr("x", x).attr("y", y).attr("dy", -1.3)
           .text(name).on("click", editLabel);
@@ -6179,7 +6325,7 @@ function fantasyMap() {
     var stateManors = $.grep(manors, function(e) {return (e.region === s);});
     stateManors.map(function(m) {
       labels.select("#manorLabel"+m.i).classed("drag", true);
-      burgs.select("#manorIcon"+m.i).classed("drag", true);
+      icons.select("#manorIcon"+m.i).classed("drag", true);
     });
   }
 
@@ -6489,7 +6635,7 @@ function fantasyMap() {
     cults.attr("opacity", .6);
     rivers.attr("opacity", 1).attr("fill", "#5d97bb");
     lakes.attr("opacity", 1).attr("fill", "#a6c1fd").attr("stroke", "#477794").attr("stroke-width", .3);
-    burgs.attr("opacity", 1).attr("fill", "#ffffff").attr("stroke", "#3e3e4b");
+    icons.selectAll("g").attr("opacity", 1).attr("fill", "#ffffff").attr("stroke", "#3e3e4b");
     roads.attr("opacity", .9).attr("stroke", "#d06324").attr("stroke-width", .35).attr("stroke-dasharray", "1.5").attr("stroke-linecap", "butt");
     trails.attr("opacity", .9).attr("stroke", "#d06324").attr("stroke-width", .15).attr("stroke-dasharray", ".8 1.6").attr("stroke-linecap", "butt");
     searoutes.attr("opacity", .8).attr("stroke", "#ffffff").attr("stroke-width", .2).attr("stroke-dasharray", "1 2").attr("stroke-linecap", "round");
@@ -6522,7 +6668,7 @@ function fantasyMap() {
       // filter
       if (sel == "oceanBase") {el = oceanLayers.select("rect");}
       styleFilterInput.value = el.attr("filter") || "";
-      if (sel === "rivers" || sel === "oceanBase" || sel === "lakes" || sel === "landmass" || sel === "burgs") {
+      if (sel === "rivers" || sel === "oceanBase" || sel === "lakes" || sel === "landmass") {
         $("#styleFill").css("display", "inline-block");
         styleFillInput.value = styleFillOutput.value = el.attr("fill");
       }
@@ -6579,11 +6725,6 @@ function fantasyMap() {
       if (sel === "labels") {
         $("#styleFill, #styleFontSize").css("display", "inline-block");
         styleFillInput.value = styleFillOutput.value = el.select("g").attr("fill");
-      }
-      if (sel === "burgs") {
-        $("#styleSize").css("display", "block");
-        $("#styleStroke").css("display", "inline-block");
-        styleStrokeInput.value = styleStrokeOutput.value = el.attr("stroke");
       }
       if (sel === "overlay") {
         $("#styleOverlay").css("display", "block");
@@ -6770,7 +6911,7 @@ function fantasyMap() {
     $("#mapLayers li").not("#toggleOcean").addClass("buttonoff");
     $("#toggleOcean").removeClass("buttonoff");
     $("#oceanPattern").fadeIn();
-    $("#rivers, #terrain, #borders, #regions, #burgs, #labels, #routes, #grid").fadeOut();
+    $("#rivers, #terrain, #borders, #regions, #icons, #labels, #routes, #grid").fadeOut();
     cults.selectAll("path").remove();
     terrs.selectAll("path").remove();
     if (preset === "layoutPolitical") {

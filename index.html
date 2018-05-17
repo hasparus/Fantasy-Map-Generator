@@ -32,8 +32,8 @@
   <script src="libs/quantize.min.js" defer></script>
   <script src="libs/d3-hexbin.v0.2.min.js" defer></script>
   <script src="libs/jquery.ui.touch-punch.min.js" defer></script>
-  <link rel="stylesheet" type="text/css" href="index.css?version=0.5608b"/>
-  <link rel="stylesheet" type="text/css" href="icons.css?version=0.5608b"/>
+  <link rel="stylesheet" type="text/css" href="index.css?version=0.5610b"/>
+  <link rel="stylesheet" type="text/css" href="icons.css?version=0.5610b"/>
   <link rel="stylesheet" type="text/css" href="https://code.jquery.com/ui/1.12.1/themes/base/jquery-ui.css"/>
 </head>
 <body>
@@ -180,7 +180,7 @@
           <li onmouseover="tip('Toggle Borders')" id="toggleBorders" onclick="$('#borders').fadeToggle()">Borders</li>
           <li onmouseover="tip('Toggle Relief icons')" id="toggleRelief" onclick="$('#terrain').fadeToggle()">Relief</li>
           <li onmouseover="tip('Toggle Labels')" id="toggleLabels" onclick="$('#labels').fadeToggle()">Labels</li>
-          <li onmouseover="tip('Toggle Burg icons')" id="toggleIcons" onclick="$('#burgs').fadeToggle()">Burgs</li>
+          <li onmouseover="tip('Toggle Icons')" id="toggleIcons" onclick="$('#icons').fadeToggle()">Icons</li>
         </ul>
         <div id="layoutCheckboxes">
           <input id="hideLabels" class="checkbox" type="checkbox" checked>
@@ -209,7 +209,7 @@
           <option value="coastline">Coastline</option>
           <option value="lakes">Lakes</option>
           <option value="labels">Labels</option>
-          <option value="burgs">Burgs</option>
+          <option value="icons">Icons</option>
           <option value="scaleBar">Scale bar</option>
           <option value="ruler">Rulers</option>
         </select>
@@ -495,7 +495,7 @@
     <i id="editSizeIcon" class="icon-text-height"></i>
     <input id="editSize" onmouseover="tip('Change Font size for the label Group')" class="editTrigger" value="14" type="number" min="1" max="100" step=".5"/>
     <button id="editStyleButton" onmouseover="tip('Select text color and opacity for the label Group')" class="editButton icon-brush"></button>
-    <input id="editColor" type="color" class="editTrigger" value="#3e3e4b">
+    <input id="editColor" type="color" class="editTrigger editColor" value="#3e3e4b">
     <i id="editOpacityIcon" class="icon-adjust"></i>
     <input id="editOpacity" onmouseover="tip('Change Opacity for the entire Group')" class="editTrigger" value="1" type="number" min="0" max="1" step="0.02">
     <i id="editShadowIcon" class="icon-clone"></i>
@@ -539,6 +539,29 @@
     <button id="routeSplit" onmouseover="tip('Click on a control point to split the route')" class="icon-unlink" onclick="$(this).toggleClass('pressed')"></button>
     <button id="routeNew" onmouseover="tip('Create new route clicking on map')" class="icon-map-pin"></button>
     <button id="routeRemove" onmouseover="tip('Remove route')" class="icon-trash"></button>
+  </div>
+
+  <div id="iconEditor" class="dialog" style="display: none">
+    <button id="iconGroups" onmouseover="tip('Change icon group')" class="icon-tags"></button>
+    <div id="iconGroupsSelection" style="display: none">
+      <select id="iconGroup" onmouseover="tip('Select a group for this icon')"></select>
+      <i id="iconRemoveGroup" onmouseover="tip('Remove selected icon group')" class="icon-trash" style="cursor: pointer;"></i>
+    </div>
+    <button id="iconColors" onmouseover="tip('Change icon colors')" class="editButton icon-brush"></button>
+    <div id="iconColorsSection" style="display: none">
+        <i onmouseover="tip('Change group fill color')" class="icon-f"></i>
+        <input id="iconFillColor" onmouseover="tip('Change group fill color')" type="color" class="editColor" value="#000000">
+        <i onmouseover="tip('Change group stroke color')" class="icon-s"></i>
+        <input id="iconStrokeColor" onmouseover="tip('Change group stroke color')" type="color" class="editColor" value="#000000">
+    </div>
+    <button id="iconSize" onmouseover="tip('Change group size')" class="icon-resize-full"></button>
+    <div id="iconSizeSection" style="display: none">
+      <i onmouseover="tip('Change size for group icon')" class="icon-s"></i>
+      <input id="iconRadius" onmouseover="tip('Change size for group icon')" type="range" class="editRange" value="1" min=".1" max="5" step=".05"></select>
+      <i onmouseover="tip('Change group stroke-width')" class="icon-w"></i>
+      <input id="iconStrokeWidth" onmouseover="tip('Change group stroke-width')" type="number" class="editNumber" value="1" min="0" max="2" step=".02"></select>
+    </div>
+    <button id="iconRemove" onmouseover="tip('Remove icon')" class="icon-trash"></button>
   </div>
 
   <div id="templateEditor" class="dialog stable" style="display: none">
@@ -819,5 +842,5 @@
     <input type="file" accept=".txt" id="templateToLoad">
   </div>
 
-  <script src="script.js?version=0.5608b"></script>
+  <script src="script.js?version=0.5610b"></script>
 </body>

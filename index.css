@@ -86,8 +86,8 @@ button, select, a {
   cursor: pointer;
 }
 
-#burgs {
-    fill-opacity: 0.6;
+#icons {
+    fill-opacity: 0.7;
     cursor: pointer;
 }
 
@@ -190,10 +190,18 @@ button, select, a {
     width: 125px;
 }
 
-#editColor {
-    height: 20px;
-    width: 50px;
+input[type="color"].editColor {
+    height: 18px;
+    width: 46px;
     padding: 0;
+}
+
+input[type="range"].editRange {
+    width: 80px;
+}
+
+input[type="number"].editNumber {
+    width: 44px;
 }
 
 #riverScale {
@@ -216,7 +224,7 @@ button, select, a {
     width: 34px;
 }
 
-#riverEditor > *, #routeEditor > * {
+#riverEditor > *, #routeEditor > *, #iconEditor > * {
     display: inline-block;
 }
 
@@ -1092,12 +1100,6 @@ div.states button.selectCapital {
   border: 0;
   background: none;
   cursor: pointer;
-}
-
-#icon-anchor {
-    fill: white;
-    stroke: #3e3e4b;
-    stroke-width: 1.2;
 }
 
 #overlay {
