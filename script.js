@@ -4360,7 +4360,7 @@ function fantasyMap() {
                                 or resize the canvas to ${nWidth} x ${nHeight} pixels`;
       $("#alert").dialog({title: "Map size conflict",
         buttons: {
-          "Fit": function() {
+          Fit: function() {
             voronoi = d3.voronoi().extent([[0, 0], [nWidth, nHeight]]);
             graphWidth = nWidth;
             graphHeight = nHeight;
@@ -4378,7 +4378,7 @@ function fantasyMap() {
             zoom.translateExtent([[0, 0], [nWidth, nHeight]]).scaleExtent([scaleTo, 20]).scaleTo(svg, scaleTo);
             $(this).dialog("close");
           },
-          "Resize": function() {
+          Resize: function() {
             mapWidthInput.value = graphWidth = nWidth;
             mapHeightInput.value = graphHeight = nHeight;
             changeMapSize();
@@ -4474,6 +4474,15 @@ function fantasyMap() {
       if (!el.attr("data-size")) {el.attr("data-size", +el.attr("font-size"));}
       if (el.style("display") === "none") {el.node().style.display = null;}
     });
+
+    if (data[0] === "0.56b" || data[0] === "0.55b" || data[0] === "0.54b") {
+      if (!icons.select("#icons").size()) {
+        icons.append("g").attr("id", "towns").attr("size", .5)
+          .attr("stroke-width", .12).attr("opacity", 1).attr("fill", "#ffffff").attr("stroke", "#3e3e4b");;
+        icons.append("g").attr("id", "capitals").attr("size", 1)
+          .attr("stroke-width", .24).attr("opacity", 1).attr("fill", "#ffffff").attr("stroke", "#3e3e4b");
+      }
+    }
 
     invokeActiveZooming();
     console.timeEnd("loadMap");
