@@ -2747,7 +2747,7 @@ function fantasyMap() {
       if (portsOnIsland.length) {ports.push(portsOnIsland);}
     }
     ports.sort(function(a, b) {return b.length - a.length;});
-    icons.select("#anchors").remove();
+    icons.selectAll("#capital-anchors, #town-anchors").remove();
     const cAnchors = icons.append("g").attr("id", "capital-anchors")
       .attr("fill", "#ffffff").attr("stroke", "#3e3e4b").attr("stroke-width", 1.2).attr("size", 2.2);
     const tAnchors = icons.append("g").attr("id", "town-anchors")
@@ -2987,6 +2987,7 @@ function fantasyMap() {
   // For each non-capital manor detect the closes capital (used for areas)
   function drawManors() {
     console.time('drawManors');
+    icons.selectAll("#capitals, #towns").remove();
     const iCapitals = icons.append("g").attr("id", "capitals").attr("size", 1)
       .attr("stroke-width", .24).attr("opacity", 1).attr("fill", "#ffffff").attr("stroke", "#3e3e4b");
     const iTowns = icons.append("g").attr("id", "towns").attr("size", .5)
