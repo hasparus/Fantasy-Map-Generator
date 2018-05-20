@@ -4127,8 +4127,10 @@ function fantasyMap() {
     console.time("saveAsImage");
     // get all used fonts
     var fontsInUse = []; // to store fonts currently in use
+    const webSafe = ["Georgia", "Times+New+Roman", "Comic+Sans+MS", "Lucida+Sans+Unicode", "Courier+New"];
     labels.selectAll("g").each(function(d) {
       var font = d3.select(this).attr("data-font");
+      if (webSafe.indexOf(font) !== -1) return;
       if (fontsInUse.indexOf(font) === -1) {fontsInUse.push(font);}
     });
     var fontsToLoad = "https://fonts.googleapis.com/css?family=" + fontsInUse.join("|");
