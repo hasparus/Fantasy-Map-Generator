@@ -501,10 +501,10 @@ p {
 }
 
 #tooltip {
-  position: absolute;
+  position: fixed;
   display: none;
   text-align: center;
-  top: 96%;
+  top: calc(98vh - (10px + 0.5vw));
   width: 100%;
   cursor: default;
   text-shadow: 1px 0px 1px #1d0e0f;

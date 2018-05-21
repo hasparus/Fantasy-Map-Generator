@@ -41,20 +41,24 @@ function fantasyMap() {
   // main data variables
   var voronoi, diagram, polygons, points = [], sample;
 
+  // Set graph and canvas size to window size
+  mapWidthInput.value = window.innerWidth;
+  mapHeightInput.value = window.innerHeight;
+  let graphWidth = +mapWidthInput.value; // voronoi graph extention, should be stable for each map
+  let graphHeight = +mapHeightInput.value;
+  let svgWidth = graphWidth, svgHeight = graphHeight;  // svg canvas resolution, can vary for each map
+
   // Common variables
-  var graphWidth, graphHeight, // voronoi graph extention, should be stable for each map
-    svgWidth, svgHeight, // svg canvas resolution, can vary for each map
-    allowResize = true,
-    modules = {}, customization, history = [], historyStage = 0, elSelected,
+  var modules = {}, customization, history = [], historyStage = 0, elSelected, autoResize = true,
     cells = [], land = [], riversData = [],  manors = [], states = [],
     queue = [], chain = {}, fonts = [],
     island = 0, cultureTree, manorTree;
 
-  // canvas
+  // canvas element for raster images
   var canvas = document.getElementById("canvas"),
     ctx = canvas.getContext("2d");
 
-  // Color schemes;
+  // Color schemes
   var color = d3.scaleSequential(d3.interpolateSpectral),
       colors8 = d3.scaleOrdinal(d3.schemeSet2),
       colors20 = d3.scaleOrdinal(d3.schemeCategory20);
@@ -72,13 +76,6 @@ function fantasyMap() {
     swampiness = +swampinessInput.value,
     precipitation = +precInput.value;
 
-  // Get screen size
-  mapWidthInput.value = window.innerWidth;
-  mapHeightInput.value = window.innerHeight;
-  svgWidth = graphWidth = +mapWidthInput.value;
-  svgHeight = graphHeight = +mapHeightInput.value;
-  svg.attr("width", svgWidth).attr("height", svgHeight);
-
   // D3 Line generator variables
   var lineGen = d3.line().x(function(d) {return d.scX;}).y(function(d) {return d.scY;}).curve(d3.curveCatmullRom);
 
@@ -92,7 +89,6 @@ function fantasyMap() {
   $("#loading, #initial").remove();
   svg.style("background-color", "#000000");
   $("#optionsContainer, #tooltip").show();
-  fitTooltip();
 
   $("#optionsContainer").draggable({handle: ".drag-trigger", snap: "svg", snapMode: "both"});
   $("#mapLayers").sortable({items: "li:not(.solid)", cancel: ".solid", update: moveLayer});
@@ -379,7 +375,7 @@ function fantasyMap() {
         if (c2 === c1 && x1 !== x0 && y1 !== y0) {return;}
         c1 = c2;
         selection = defineStateBrushSelection(c2);
-        changeStateForSelection(selection);
+        if (selection) changeStateForSelection(selection);
       }
       if (opisometer || planimeter) {
         var l = points[points.length - 1];
@@ -444,9 +440,11 @@ function fantasyMap() {
 
   // define selection based on radius
   function defineStateBrushSelection(center) {
+    if (cells[center].height < 0.2) return;
     let radius = +countriesManuallyBrush.value;
     let selection = [center];
     if (radius > 1) {selection = selection.concat(cells[center].neighbors);}
+    selection = $.grep(selection, function(e) {return (cells[e].height >= 0.2);});
     if (radius === 2) {return selection;}
     let frontier = cells[center].neighbors;
     while (radius > 2) {
@@ -454,18 +452,21 @@ function fantasyMap() {
       frontier = [];
       cycle.map(function(s) {
         cells[s].neighbors.forEach(function(e) {
-          if (selection.indexOf(e) !== -1) {return;}
+          if (selection.indexOf(e) !== -1) return;
+          if (cells[e].height < 0.2) return;
           selection.push(e);
           frontier.push(e);
         });
       });
       radius--;
     }
-    return $.grep(selection, function(e) {return (cells[e].height >= 0.2);});
+    selection = $.grep(selection, function(e) {return (cells[e].height >= 0.2);});
+    return selection;
   }
 
   // change region within selection
   function changeStateForSelection(selection) {
+    if (selection.length === 0) return;
     let stateNew, exists, stateOld, color;
     const temp = regions.select("#temp");
     selection.map(function(index) {
@@ -775,7 +776,7 @@ function fantasyMap() {
   function addStrait(width) {
     var session = Math.ceil(Math.random() * 100000);
     var top = Math.floor(Math.random() * graphWidth * 0.35 + graphWidth * 0.3);
-    var bottom = Math.floor((svgWidth - top) - (graphWidth * 0.1) + (Math.random() * graphWidth * 0.2));
+    var bottom = Math.floor((graphWidth - top) - (graphWidth * 0.1) + (Math.random() * graphWidth * 0.2));
     var start = diagram.find(top, graphHeight * 0.2).index;
     var end = diagram.find(bottom, graphHeight * 0.8).index;
     var range = [];
@@ -1281,14 +1282,7 @@ function fantasyMap() {
     scaleBar.insert("rect", ":first-child").attr("x", -10).attr("y", -20).attr("width", bbox.width + 10).attr("height", bbox.height + 15)
       .attr("stroke-width", size).attr("stroke", "none").attr("filter", "url(#blur5)")
       .attr("fill", barBackColor.value).attr("opacity", +barBackOpacity.value);
-    // move scaleBar to desired bottom-right point
-    if (sessionStorage.getItem("scaleBar")) {
-      var scalePos = sessionStorage.getItem("scaleBar").split(",");
-      var tr = [+scalePos[0] - bbox.width, +scalePos[1] - bbox.height];
-    } else {
-      var tr = [svgWidth - 10 - bbox.width, svgHeight - bbox.height];
-    }
-    scaleBar.attr("transform", "translate(" + rn(tr[0]) + "," + rn(tr[1]) + ")");
+    fitScaleBar();
   }
 
   // draw default ruler measiring land x-axis edges
@@ -1316,20 +1310,26 @@ function fantasyMap() {
 
   // drag any element changing transform
   function elementDrag() {
-    var el = d3.select(this);
-    var tr = parseTransform(el.attr("transform"));
-    var dx = +tr[0] - d3.event.x, dy = +tr[1] - d3.event.y;
+    const el = d3.select(this);
+    const tr = parseTransform(el.attr("transform"));
+    const x = d3.event.x, y = d3.event.y;
+    const dx = +tr[0] - x, dy = +tr[1] - y;
+
     d3.event.on("drag", function() {
-      var x = d3.event.x, y = d3.event.y;
-      var transform = `translate(${(dx+x)},${(dy+y)})`;
+      const x = d3.event.x, y = d3.event.y;
+      const transform = `translate(${(dx+x)},${(dy+y)})`;
       el.attr("transform", transform);
     });
 
     d3.event.on("end", function() {
       // remember scaleBar bottom-right position
       if (el.attr("id") === "scaleBar") {
-        var bbox = el.node().getBoundingClientRect();
-        sessionStorage.setItem("scaleBar", [bbox.right, bbox.bottom])
+        const xEnd = d3.event.x, yEnd = d3.event.y;
+        const diff = Math.abs(x - xEnd) + Math.abs(y - yEnd);
+        if (diff > 5) {
+          const bbox = el.node().getBoundingClientRect();
+          sessionStorage.setItem("scaleBar", [bbox.right, bbox.bottom]);
+        }
       }
     });
   }
@@ -3530,7 +3530,6 @@ function fantasyMap() {
   function getMap(keepData) {
     exitCustomization();
     console.time("TOTAL");
-    applyMapSize();
     randomizeOptions();
     markFeatures();
     drawOcean();
@@ -4279,7 +4278,6 @@ function fantasyMap() {
     link.download = "fantasy_map_" + Date.now() + ".map";
     link.href = dataURL;
     document.body.appendChild(link);
-    allowResize = false;
     link.click();
 
     // restore initial values
@@ -4351,26 +4349,32 @@ function fantasyMap() {
     }
 
     svg = d3.select("svg");
-    // check map size
+
+    // always change graph size to the size of loaded map
     const nWidth = +svg.attr("width"), nHeight = +svg.attr("height");
-    // temporary fit svg element to current canvas size
+    graphWidth = nWidth;
+    graphHeight = nHeight;
+    voronoi = d3.voronoi().extent([[0, 0], [graphWidth, graphHeight]]);
+    initView = [1, 0, 0];
+    zoom.translateExtent([[0, 0], [graphWidth, graphHeight]]).scaleExtent([1, 20]).scaleTo(svg, 1);
+    viewbox.attr("transform", null);
+    ocean.selectAll("rect").attr("x", 0).attr("y", 0).attr("width", "100%").attr("height", "100%");
+
+    // temporary fit loaded svg element to current canvas size
     svg.attr("width", svgWidth).attr("height", svgHeight);
     if (nWidth !== svgWidth || nHeight !== svgHeight) {
       alertMessage.innerHTML  = `The loaded map has size ${nWidth} x ${nHeight} pixels,
                                 while the current canvas size is ${svgWidth} x ${svgHeight} pixels.
-                                You may either fit the loaded map to the current window
-                                or resize the canvas to ${nWidth} x ${nHeight} pixels`;
+                                You may either fit the loaded map to the current canvas
+                                or resize the current canvas to ${nWidth} x ${nHeight} pixels`;
       $("#alert").dialog({title: "Map size conflict",
         buttons: {
           Fit: function() {
-            voronoi = d3.voronoi().extent([[0, 0], [nWidth, nHeight]]);
-            graphWidth = nWidth;
-            graphHeight = nHeight;
             applyLoadedData(data);
             // rescale loaded map
             const xRatio = svgWidth / nWidth;
             const yRatio = svgHeight / nHeight;
-            const scaleTo = rn(Math.min(xRatio, yRatio), 2);
+            const scaleTo = rn(Math.min(xRatio, yRatio), 4);
             // calculate frames to scretch ocean background
             const extent = (100 / scaleTo) + "%";
             const xShift = (nWidth * scaleTo - svgWidth) / 2 / scaleTo;
@@ -4381,8 +4385,8 @@ function fantasyMap() {
             $(this).dialog("close");
           },
           Resize: function() {
-            mapWidthInput.value = graphWidth = nWidth;
-            mapHeightInput.value = graphHeight = nHeight;
+            mapWidthInput.value = nWidth;
+            mapHeightInput.value = nHeight;
             changeMapSize();
             applyLoadedData(data);
             $(this).dialog("close");
@@ -4931,17 +4935,17 @@ function fantasyMap() {
       var rulerNew = ruler.append("g").attr("class", "linear").call(d3.drag().on("start", elementDrag));
       var factor = rn(1 / Math.pow(scale, 0.3), 1);
       rulerNew.append("title").text(title);
-      var y = Math.floor(Math.random() * svgHeight * 0.5 + svgHeight * 0.25);
-      var x1 = svgWidth * 0.2, x2 = svgWidth * 0.8;
+      var y = Math.floor(Math.random() * graphHeight * 0.5 + graphHeight * 0.25);
+      var x1 = graphWidth * 0.2, x2 = graphWidth * 0.8;
       var dash = rn(30 / distanceScale.value, 2);
       rulerNew.append("line").attr("x1", x1).attr("y1", y).attr("x2", x2).attr("y2", y).attr("class", "white").attr("stroke-width", factor);
       rulerNew.append("line").attr("x1", x1).attr("y1", y).attr("x2", x2).attr("y2", y).attr("class", "gray").attr("stroke-width", factor).attr("stroke-dasharray", dash);
       rulerNew.append("circle").attr("r", 2 * factor).attr("stroke-width", 0.5 * factor).attr("cx", x1).attr("cy", y).attr("data-edge", "left").call(d3.drag().on("drag", rulerEdgeDrag));
       rulerNew.append("circle").attr("r", 2 * factor).attr("stroke-width", 0.5 * factor).attr("cx", x2).attr("cy", y).attr("data-edge", "rigth").call(d3.drag().on("drag", rulerEdgeDrag));
-      rulerNew.append("circle").attr("r", 1.2 * factor).attr("stroke-width", 0.3 * factor).attr("cx", svgWidth / 2).attr("cy", y).attr("class", "center").call(d3.drag().on("start", rulerCenterDrag));
+      rulerNew.append("circle").attr("r", 1.2 * factor).attr("stroke-width", 0.3 * factor).attr("cx", graphWidth / 2).attr("cy", y).attr("class", "center").call(d3.drag().on("start", rulerCenterDrag));
       var dist = rn(x2 - x1);
       var label = rn(dist * distanceScale.value) + " " + distanceUnit.value;
-      rulerNew.append("text").attr("x", svgWidth / 2).attr("y", y).attr("dy", -1).attr("data-dist", dist).text(label).text(label).on("click", removeParent).attr("font-size", 10 * factor);
+      rulerNew.append("text").attr("x", graphWidth / 2).attr("y", y).attr("dy", -1).attr("data-dist", dist).text(label).text(label).on("click", removeParent).attr("font-size", 10 * factor);
       return;
     }
     if (id === "addOpisometer" || id === "addPlanimeter") {
@@ -6409,7 +6413,7 @@ function fantasyMap() {
     manors.map(function(m) {
       const cell = diagram.find(m.x, m.y).index;
       if (cells[cell].height < 0.2) {
-        // remove manor if it ocean
+        // remove manor in ocean
         m.region = "removed";
         m.cell = cell;
         labels.select("#manorLabel"+m.i).remove();
@@ -6609,13 +6613,12 @@ function fantasyMap() {
     svg.attr("width", svgWidth).attr("height", svgHeight);
     zoom.translateExtent([[0, 0], [svgWidth, svgHeight]]);
     fitScaleBar();
-    fitTooltip();
   }
 
   // fit full-screen map if window is resized
   $(window).resize(function(e) {
     // trick to prevent resize on download bar opening
-    if (allowResize === false) {allowResize = true; return;}
+    if (autoResize === false) return;
     mapWidthInput.value = window.innerWidth;
     mapHeightInput.value = window.innerHeight;
     changeMapSize();
@@ -6623,17 +6626,15 @@ function fantasyMap() {
 
   // fit ScaleBar to map size
   function fitScaleBar() {
-    if (d3.select("#scaleBar").size()) {
-      var bbox = d3.select("#scaleBar").node().getBBox();
-      var tr = [svgWidth - 10 - bbox.width, svgHeight - 10 - bbox.height];
-      d3.select("#scaleBar").attr("transform", "translate(" + rn(tr[0]) + "," + rn(tr[1]) + ")");
-      sessionStorage.removeItem("scaleBar");
+    const el = d3.select("#scaleBar");
+    if (el.size() === 0) return;
+    const bbox = el.select("rect").node().getBBox();
+    let tr = [svgWidth - bbox.width, svgHeight - (bbox.height - 10)];
+    if (sessionStorage.getItem("scaleBar")) {
+      const scalePos = sessionStorage.getItem("scaleBar").split(",");
+      tr = [+scalePos[0] - bbox.width, +scalePos[1] - bbox.height];
     }
-  }
-
-  // fit Tooltip line to map size
-  function fitTooltip() {
-    tooltip.style.top = svgHeight - 40;
+    el.attr("transform", "translate(" + rn(tr[0]) + "," + rn(tr[1]) + ")");
   }
 
   // restore initial style
@@ -6809,6 +6810,7 @@ function fantasyMap() {
     }
     if (id === "mapWidthInput" || id === "mapHeightInput") {
       changeMapSize();
+      autoResize = false;
       sessionStorage.setItem("screenSize", [+mapWidthInput.value, +mapHeightInput.value]);
     }
     if (id === "sizeInput") {
